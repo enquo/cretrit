@@ -24,6 +24,13 @@ fn deserialise_ciphertext(v: &[u8]) -> ore::CipherText<'_, 8, 256> {
     ore::CipherText::<8, 256>::from_slice(v).unwrap()
 }
 
+fn compare_ciphertexts(
+    a: &ore::CipherText<'_, 8, 256>,
+    b: &ore::CipherText<'_, 8, 256>,
+) -> std::cmp::Ordering {
+    a.cmp(b)
+}
+
 pub fn benchmarks(c: &mut Criterion) {
     c.bench_function("create ORE cipher", |b| b.iter(|| create_ore_cipher()));
     c.bench_function("encrypt u64", |b| {
@@ -39,6 +46,12 @@ pub fn benchmarks(c: &mut Criterion) {
         let c = create_ore_cipher();
         let sct = serialise_ciphertext(&encrypt_u64(&c, 42));
         b.iter(|| deserialise_ciphertext(&sct))
+    });
+    c.bench_function("compare", |b| {
+        let c = create_ore_cipher();
+        let ct1 = encrypt_u64(&c, 42);
+        let ct2 = encrypt_u64(&c, 420);
+        b.iter(|| compare_ciphertexts(&ct1, &ct2))
     });
 }
 

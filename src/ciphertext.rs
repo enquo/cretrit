@@ -413,18 +413,20 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
         left: &LeftCipherText<'a, S, CMP, N, W, M>,
         right: &RightCipherText<'a, S, CMP, N, W, M>,
     ) -> Result<u8, Error> {
+        let mut result: Option<u8> = None;
+
         for n in 0..N {
             let v_h = right.value(n, left.px(n));
             let h_k_r = S::HF::hash(&left.f(n).into(), &right.nonce(n))?;
 
             let res = (v_h as i16 - h_k_r as i16).rem_euclid(M as i16) as u8;
 
-            if res != 0 {
-                return Ok(res);
+            if res != 0 && result == None {
+                result = Some(res);
             }
         }
 
-        Ok(0)
+        Ok(result.unwrap_or(0))
     }
 }
 
