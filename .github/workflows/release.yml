@@ -1,0 +1,33 @@
+name: "Release to crates.io"
+on:
+  release:
+    types: [created]
+  workflow_dispatch:
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    name: "Upload"
+
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Install rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Set Cargo.toml version
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.ref }}
+        run: |
+          mv Cargo.toml Cargo.toml.tmpl
+          sed "s/0\\.0\\.0-git/${RELEASE_TAG##*\/v}/" Cargo.toml.tmpl >Cargo.toml
+          rm Cargo.toml.tmpl
+
+      - name: Do The Needful
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: |
+          cargo publish --allow-dirty
