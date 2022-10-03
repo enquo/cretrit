@@ -13,7 +13,7 @@ fn create_ore_cipher() -> ore::Cipher<8, 256> {
 
 #[inline]
 fn encrypt_u64<'a>(c: &'a ore::Cipher<8, 256>, u: u64) -> ore::CipherText<'a, 8, 256> {
-    c.encrypt(u.into()).unwrap()
+    c.full_encrypt(u.into()).unwrap()
 }
 
 fn serialise_ciphertext(ct: &ore::CipherText<'_, 8, 256>) -> Vec<u8> {
