@@ -52,11 +52,18 @@ impl<S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16, con
         })
     }
 
-    pub fn encrypt(
+    pub fn full_encrypt(
         &self,
         value: PlainText<N, W>,
     ) -> Result<CipherText<'_, S, CMP, N, W, M>, Error> {
         CipherText::<S, CMP, N, W, M>::new(self, &value)
+    }
+
+    pub fn right_encrypt(
+        &self,
+        value: PlainText<N, W>,
+    ) -> Result<CipherText<'_, S, CMP, N, W, M>, Error> {
+        CipherText::<S, CMP, N, W, M>::new_right(self, &value)
     }
 
     pub(crate) fn fill_nonce(&self, nonce: &mut [u8]) -> Result<(), Error> {

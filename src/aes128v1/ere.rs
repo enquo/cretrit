@@ -47,7 +47,7 @@ mod tests {
     fn tiny_self_equality() {
         let cipher = Cipher::<1, 4>::new(key()).unwrap();
 
-        let n = cipher.encrypt(PlainText::<1, 4>::new([2u16])).unwrap();
+        let n = cipher.full_encrypt(PlainText::<1, 4>::new([2u16])).unwrap();
 
         assert_eq!(0, n.compare(&n).unwrap());
     }
@@ -56,8 +56,8 @@ mod tests {
     fn tiny_equality() {
         let cipher = Cipher::<1, 4>::new(key()).unwrap();
 
-        let n2_1 = cipher.encrypt(PlainText::<1, 4>::new([2u16])).unwrap();
-        let n2_2 = cipher.encrypt(PlainText::<1, 4>::new([2u16])).unwrap();
+        let n2_1 = cipher.full_encrypt(PlainText::<1, 4>::new([2u16])).unwrap();
+        let n2_2 = cipher.full_encrypt(PlainText::<1, 4>::new([2u16])).unwrap();
 
         assert_eq!(0, n2_1.compare(&n2_2).unwrap());
         assert_eq!(0, n2_2.compare(&n2_1).unwrap());
@@ -67,8 +67,8 @@ mod tests {
     fn tiny_inequality() {
         let cipher = Cipher::<1, 4>::new(key()).unwrap();
 
-        let n1 = cipher.encrypt(PlainText::<1, 4>::new([1u16])).unwrap();
-        let n2 = cipher.encrypt(PlainText::<1, 4>::new([2u16])).unwrap();
+        let n1 = cipher.full_encrypt(PlainText::<1, 4>::new([1u16])).unwrap();
+        let n2 = cipher.full_encrypt(PlainText::<1, 4>::new([2u16])).unwrap();
 
         assert_eq!(1, n1.compare(&n2).unwrap());
         assert_eq!(1, n2.compare(&n1).unwrap());
@@ -78,7 +78,9 @@ mod tests {
     fn smol_self_equality() {
         let cipher = Cipher::<2, 16>::new(key()).unwrap();
 
-        let n12 = cipher.encrypt(PlainText::<2, 16>::new([0u16, 12])).unwrap();
+        let n12 = cipher
+            .full_encrypt(PlainText::<2, 16>::new([0u16, 12]))
+            .unwrap();
 
         assert_eq!(0, n12.compare(&n12).unwrap());
     }
@@ -87,8 +89,12 @@ mod tests {
     fn smol_equality() {
         let cipher = Cipher::<2, 16>::new(key()).unwrap();
 
-        let n12_1 = cipher.encrypt(PlainText::<2, 16>::new([0u16, 12])).unwrap();
-        let n12_2 = cipher.encrypt(PlainText::<2, 16>::new([0u16, 12])).unwrap();
+        let n12_1 = cipher
+            .full_encrypt(PlainText::<2, 16>::new([0u16, 12]))
+            .unwrap();
+        let n12_2 = cipher
+            .full_encrypt(PlainText::<2, 16>::new([0u16, 12]))
+            .unwrap();
 
         assert_eq!(0, n12_1.compare(&n12_2).unwrap());
         assert_eq!(0, n12_2.compare(&n12_1).unwrap());
@@ -98,8 +104,12 @@ mod tests {
     fn smol_inequality() {
         let cipher = Cipher::<2, 16>::new(key()).unwrap();
 
-        let n1 = cipher.encrypt(PlainText::<2, 16>::new([0u16, 1])).unwrap();
-        let n2 = cipher.encrypt(PlainText::<2, 16>::new([0u16, 2])).unwrap();
+        let n1 = cipher
+            .full_encrypt(PlainText::<2, 16>::new([0u16, 1]))
+            .unwrap();
+        let n2 = cipher
+            .full_encrypt(PlainText::<2, 16>::new([0u16, 2]))
+            .unwrap();
 
         assert_eq!(1, n1.compare(&n2).unwrap());
         assert_eq!(1, n2.compare(&n1).unwrap());
@@ -109,8 +119,10 @@ mod tests {
     fn big_diff_energy() {
         let cipher = Cipher::<8, 256>::new(key()).unwrap();
 
-        let n1 = cipher.encrypt(1u64.into()).unwrap();
-        let n2 = cipher.encrypt(372_363_178_678_738_176u64.into()).unwrap();
+        let n1 = cipher.full_encrypt(1u64.into()).unwrap();
+        let n2 = cipher
+            .full_encrypt(372_363_178_678_738_176u64.into())
+            .unwrap();
 
         assert_eq!(1, n1.compare(&n2).unwrap());
         assert_eq!(1, n2.compare(&n1).unwrap());
@@ -120,8 +132,8 @@ mod tests {
         fn u64_compare(a: u64, b: u64) -> bool {
             let cipher = Cipher::<8, 256>::new(key()).unwrap();
 
-            let ca = cipher.encrypt(a.into()).unwrap();
-            let cb = cipher.encrypt(b.into()).unwrap();
+            let ca = cipher.full_encrypt(a.into()).unwrap();
+            let cb = cipher.full_encrypt(b.into()).unwrap();
 
             if a == b {
                 ca.compare(&cb).unwrap() == 0
@@ -133,8 +145,8 @@ mod tests {
         fn u32_compare(a: u32, b: u32) -> bool {
             let cipher = Cipher::<4, 256>::new(key()).unwrap();
 
-            let ca = cipher.encrypt(a.into()).unwrap();
-            let cb = cipher.encrypt(b.into()).unwrap();
+            let ca = cipher.full_encrypt(a.into()).unwrap();
+            let cb = cipher.full_encrypt(b.into()).unwrap();
 
             if a == b {
                 ca.compare(&cb).unwrap() == 0
@@ -146,8 +158,8 @@ mod tests {
         fn u64_eq(a: u64, b: u64) -> bool {
             let cipher = Cipher::<8, 256>::new(key()).unwrap();
 
-            let ca = cipher.encrypt(a.into()).unwrap();
-            let cb = cipher.encrypt(b.into()).unwrap();
+            let ca = cipher.full_encrypt(a.into()).unwrap();
+            let cb = cipher.full_encrypt(b.into()).unwrap();
 
             if a == b {
                 ca == cb
@@ -159,8 +171,8 @@ mod tests {
         fn u32_eq(a: u32, b: u32) -> bool {
             let cipher = Cipher::<4, 256>::new(key()).unwrap();
 
-            let ca = cipher.encrypt(a.into()).unwrap();
-            let cb = cipher.encrypt(b.into()).unwrap();
+            let ca = cipher.full_encrypt(a.into()).unwrap();
+            let cb = cipher.full_encrypt(b.into()).unwrap();
 
             if a == b {
                 ca == cb

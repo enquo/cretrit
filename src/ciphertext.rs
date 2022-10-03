@@ -400,6 +400,19 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
         })
     }
 
+    pub fn new_right(
+        cipher: &'a Cipher<S, CMP, N, W, M>,
+        plaintext: &PlainText<N, W>,
+    ) -> Result<Self, Error> {
+        let mut right = RightCipherText::new(cipher)?;
+
+        for n in 0..N {
+            right.set_block(n, plaintext.block(n))?;
+        }
+
+        Ok(CipherText { left: None, right })
+    }
+
     pub fn compare(&self, other: &Self) -> Result<u8, Error> {
         match &self.left {
             None => Err(Error::ComparisonError(
@@ -538,7 +551,7 @@ mod tests {
         fn binary_full_ciphertext_roundtrips_correctly() {
             let cipher = ere::Cipher::<8, 256>::new(key()).unwrap();
 
-            let n = cipher.encrypt(31_337u64.into()).unwrap();
+            let n = cipher.full_encrypt(31_337u64.into()).unwrap();
 
             let v = n.to_vec();
 
@@ -552,8 +565,8 @@ mod tests {
         fn binary_right_ciphertext_roundtrips_correctly() {
             let cipher = ere::Cipher::<8, 256>::new(key()).unwrap();
 
-            let n1 = cipher.encrypt(31_337u64.into()).unwrap();
-            let mut n2 = cipher.encrypt(31_337u64.into()).unwrap();
+            let n1 = cipher.full_encrypt(31_337u64.into()).unwrap();
+            let mut n2 = cipher.full_encrypt(31_337u64.into()).unwrap();
             n2.left = None;
 
             let v = n2.to_vec();
@@ -572,8 +585,8 @@ mod tests {
         fn trinary_full_ciphertext_roundtrips_correctly() {
             let cipher = ore::Cipher::<8, 256>::new(key()).unwrap();
 
-            let n1 = cipher.encrypt(42u64.into()).unwrap();
-            let n2 = cipher.encrypt(31_337u64.into()).unwrap();
+            let n1 = cipher.full_encrypt(42u64.into()).unwrap();
+            let n2 = cipher.full_encrypt(31_337u64.into()).unwrap();
 
             let v1 = n1.to_vec();
             let v2 = n2.to_vec();
@@ -596,16 +609,16 @@ mod tests {
         fn trinary_right_ciphertext_roundtrips_correctly() {
             let cipher = ore::Cipher::<8, 256>::new(key()).unwrap();
 
-            let n1f = cipher.encrypt(42u64.into()).unwrap();
-            let mut n1r = cipher.encrypt(42u64.into()).unwrap();
+            let n1f = cipher.full_encrypt(42u64.into()).unwrap();
+            let mut n1r = cipher.full_encrypt(42u64.into()).unwrap();
             n1r.left = None;
 
             let v1r = n1r.to_vec();
 
             let n1r_rt = ore::CipherText::<8, 256>::from_slice(&v1r).unwrap();
 
-            let n2f = cipher.encrypt(31_337u64.into()).unwrap();
-            let mut n2r = cipher.encrypt(31_337u64.into()).unwrap();
+            let n2f = cipher.full_encrypt(31_337u64.into()).unwrap();
+            let mut n2r = cipher.full_encrypt(31_337u64.into()).unwrap();
             n2r.left = None;
 
             let v2r = n2r.to_vec();
