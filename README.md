@@ -36,7 +36,8 @@ use cretrit::aes128v1::ore;
 // 0-255.  Hence, this cipher can represent the ordering of values
 // between 0 and 256^4-1 (aka 2**32-1), which corresponds to a 32-bit
 // unsigned integer.
-let cipher: ore::Cipher::<4, 256>::new([0u8; 16]).unwrap();
+// The `[0; u16]` is the key; for real-world usage, use a cryptographically-secure key, please!
+let cipher = ore::Cipher::<4, 256>::new([0u8; 16]).unwrap();
 ```
 
 This cipher is how you encrypt plaintexts.
@@ -45,9 +46,9 @@ For encrypting unsigned integers, there are implementations of the `From` trait 
 
 ```rust
 let forty_two: u32 = 42;
-let ore_forty_two = cipher.encrypt(forty_two.into()).unwrap();
+let ore_forty_two = cipher.full_encrypt(forty_two.into()).unwrap();
 let over_nine_thousand: u32 = 9001;
-let ore_over_nine_thousand = cipher.encrypt(over_nine_thousand.into()).unwrap();
+let ore_over_nine_thousand = cipher.full_encrypt(over_nine_thousand.into()).unwrap();
 ```
 
 Ciphertexts for the order-revealing and equality-revealing encryption schemes implement `Ord`, `Eq`, and the `Partial*` variants as appropriate.
