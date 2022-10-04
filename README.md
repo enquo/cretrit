@@ -45,6 +45,9 @@ Internally, plaintexts are an array of the value of each block, and you can use 
 For encrypting unsigned integers, there are implementations of the `From` trait that allow you to pass the integers in directly, like this:
 
 ```rust
+# use cretrit::aes128v1::ore;
+# let cipher = ore::Cipher::<4, 256>::new([0u8; 16]).unwrap();
+
 let forty_two: u32 = 42;
 let ore_forty_two = cipher.full_encrypt(forty_two.into()).unwrap();
 let over_nine_thousand: u32 = 9001;
@@ -55,6 +58,12 @@ Ciphertexts for the order-revealing and equality-revealing encryption schemes im
 Thus, you can just compare the outputs of the `encrypt` function like they were any other value:
 
 ```rust
+# use cretrit::aes128v1::ore;
+# let cipher = ore::Cipher::<4, 256>::new([0u8; 16]).unwrap();
+
+# let ore_forty_two = cipher.full_encrypt(42u32.into()).unwrap();
+# let ore_over_nine_thousand = cipher.full_encrypt(9001u32.into()).unwrap();
+
 assert!(ore_forty_two != ore_over_nine_thousand);
 assert!(ore_forty_two < ore_over_nine_thousand);
 ```
@@ -65,6 +74,11 @@ A simple example of round-tripping a ciphertext:
 ```rust
 // Pull in the necessary trait
 use cretrit::SerializableCipherText;
+
+# use cretrit::aes128v1::ore;
+# let cipher = ore::Cipher::<4, 256>::new([0u8; 16]).unwrap();
+# let ore_forty_two = cipher.full_encrypt(42u32.into()).unwrap();
+# let ore_over_nine_thousand = cipher.full_encrypt(9001u32.into()).unwrap();
 
 let v = ore_forty_two.to_vec();
 
@@ -114,6 +128,7 @@ For general guidelines for contributions, see [CONTRIBUTING.md](CONTRIBUTING.md)
 Unless otherwise stated, everything in this repo is covered by the following
 licence statement (the MIT licence):
 
+```text
     Copyright (C) 2022  Matt Palmer <matt@enquo.org>
 
     Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -133,3 +148,4 @@ licence statement (the MIT licence):
     LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
     THE SOFTWARE.
+```
