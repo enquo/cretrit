@@ -113,7 +113,9 @@ For general guidelines for contributions, see [CONTRIBUTING.md](CONTRIBUTING.md)
 Unless otherwise stated, everything in this repo is covered by the following
 licence statement (the MIT licence):
 
-    Copyright (C) 2022  Matt Palmer <matt@enquo.org>
+    The MIT License (MIT)
+
+    Copyright (c) 2022 Matt Palmer <matt@enquo.org>
 
     Permission is hereby granted, free of charge, to any person obtaining a copy
     of this software and associated documentation files (the "Software"), to deal
