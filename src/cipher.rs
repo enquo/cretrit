@@ -56,6 +56,19 @@ impl<S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16, con
         })
     }
 
+    pub fn new_with_ciphersuite(
+        prf: <S as CipherSuite<W, M>>::PRF,
+        prp: <S as CipherSuite<W, M>>::PRP,
+        rng: <S as CipherSuite<W, M>>::RNG,
+    ) -> Result<Self, Error> {
+        Ok(Cipher {
+            rng: RefCell::new(rng),
+            prf,
+            prp,
+            _ffs: PhantomData,
+        })
+    }
+
     pub fn full_encrypt(
         &self,
         value: PlainText<N, W>,
