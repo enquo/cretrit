@@ -9,8 +9,8 @@ use crate::cmp::Comparator;
 use crate::hash::HashFunction;
 use crate::kbkdf::KBKDF;
 use crate::plaintext::PlainText;
-use crate::prf::PseudoRandomFunction;
-use crate::prp::PseudoRandomPermutation;
+use crate::prf::{PseudoRandomFunction, PseudoRandomFunctionInit};
+use crate::prp::{PseudoRandomPermutation, PseudoRandomPermutationInit};
 use crate::Error;
 
 pub struct Cipher<
@@ -37,11 +37,15 @@ impl<S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16, con
 impl<S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16, const M: u8>
     Cipher<S, CMP, N, W, M>
 {
-    pub fn new(key: [u8; 16]) -> Result<Self, Error> {
+    pub fn new(key: [u8; 16]) -> Result<Self, Error>
+    where
+        <S as CipherSuite<W, M>>::PRF: PseudoRandomFunctionInit,
+        <S as CipherSuite<W, M>>::PRP: PseudoRandomPermutationInit<W>,
+    {
         let kbkdf = KBKDF::new(key)?;
 
-        let prf: S::PRF = PseudoRandomFunction::new(&kbkdf)?;
-        let prp: S::PRP = PseudoRandomPermutation::new(&kbkdf)?;
+        let prf: S::PRF = PseudoRandomFunctionInit::new(&kbkdf)?;
+        let prp: S::PRP = PseudoRandomPermutationInit::new(&kbkdf)?;
         let rng: S::RNG = SeedableRng::from_entropy();
 
         Ok(Cipher {

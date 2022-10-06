@@ -7,11 +7,14 @@ use zeroize::Zeroize;
 use crate::kbkdf::*;
 use crate::Error;
 
+pub trait PseudoRandomFunctionInit: Sized + PseudoRandomFunction {
+    fn new(key: &KBKDF) -> Result<Self, Error>;
+}
+
 pub trait PseudoRandomFunction: Sized {
     type BlockType: Default + Copy + Fill + core::fmt::Debug + Into<Vec<u8>> + AsMut<[u8]>;
     const BLOCK_SIZE: usize;
 
-    fn new(key: &KBKDF) -> Result<Self, Error>;
     fn randomise(&self, value: u16, block: &mut Self::BlockType);
 }
 
@@ -19,10 +22,7 @@ pub struct AES128PRF {
     cipher: Aes128,
 }
 
-impl PseudoRandomFunction for AES128PRF {
-    type BlockType = [u8; 16];
-    const BLOCK_SIZE: usize = 16;
-
+impl PseudoRandomFunctionInit for AES128PRF {
     fn new(kdf: &KBKDF) -> Result<Self, Error> {
         let mut k: [u8; 16] = Default::default();
 
@@ -33,6 +33,11 @@ impl PseudoRandomFunction for AES128PRF {
 
         Ok(AES128PRF { cipher })
     }
+}
+
+impl PseudoRandomFunction for AES128PRF {
+    type BlockType = [u8; 16];
+    const BLOCK_SIZE: usize = 16;
 
     fn randomise(&self, value: u16, block: &mut Self::BlockType) {
         let mut a = [0u8; 16];

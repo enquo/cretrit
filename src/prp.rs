@@ -7,8 +7,11 @@ use crate::Error;
 
 use crate::kbkdf::*;
 
-pub trait PseudoRandomPermutation<const W: u16>: Sized {
+pub trait PseudoRandomPermutationInit<const W: u16>: Sized + PseudoRandomPermutation<W> {
     fn new(key: &KBKDF) -> Result<Self, Error>;
+}
+
+pub trait PseudoRandomPermutation<const W: u16>: Sized {
     fn value(&self, data: u16) -> u16;
     fn inverse(&self, data: u16) -> u16;
 }
@@ -19,7 +22,7 @@ pub struct KnuthShufflePRP<const W: u16> {
     p_1: Vec<u16>,
 }
 
-impl<const W: u16> PseudoRandomPermutation<W> for KnuthShufflePRP<W> {
+impl<const W: u16> PseudoRandomPermutationInit<W> for KnuthShufflePRP<W> {
     fn new(kdf: &KBKDF) -> Result<Self, Error> {
         let mut seed: [u8; 32] = Default::default();
         kdf.derive_key(&mut seed, b"KnuthShufflePRP.rngseed")?;
@@ -42,7 +45,9 @@ impl<const W: u16> PseudoRandomPermutation<W> for KnuthShufflePRP<W> {
 
         Ok(KnuthShufflePRP { p, p_1 })
     }
+}
 
+impl<const W: u16> PseudoRandomPermutation<W> for KnuthShufflePRP<W> {
     fn value(&self, data: u16) -> u16 {
         self.p[data as usize]
     }
