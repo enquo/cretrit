@@ -105,12 +105,12 @@ impl<S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16, con
     }
 
     pub(crate) fn permuted_value(&self, value: u16) -> u16 {
-        assert!(value < W, "{} < {} violated", value, W);
+        assert!(value < W, "{value} < {W} violated");
         self.prp.value(value)
     }
 
     pub(crate) fn inverse_permuted_value(&self, value: u16) -> u16 {
-        assert!(value < W, "{} < {} violated", value, W);
+        assert!(value < W, "{value} < {W} violated");
         self.prp.inverse(value)
     }
 

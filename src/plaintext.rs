@@ -6,7 +6,7 @@ impl<const N: usize, const W: u16> PlainText<N, W> {
     }
 
     pub fn block(&self, n: usize) -> u16 {
-        assert!(n < N, "{} < {} violated", n, N);
+        assert!(n < N, "{n} < {N} violated");
 
         self.0[n]
     }
@@ -26,11 +26,8 @@ macro_rules! from_type_to_plaintext {
 
                 assert!(
                     u == 0,
-                    "Could not represent {}{} in PlainText<{}, {}>",
-                    value,
-                    stringify!($ty),
-                    N,
-                    W
+                    "Could not represent {value}{} in PlainText<{N}, {W}>",
+                    stringify!($ty)
                 );
 
                 PlainText::<N, W>::new(p)

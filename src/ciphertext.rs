@@ -53,8 +53,8 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
     }
 
     pub fn set_block(&mut self, n: usize, value: u16) {
-        assert!(n <= N, "{} <= {} violated", value, N);
-        assert!(value < W, "{} < {} violated", value, W);
+        assert!(n <= N, "{n} <= {N} violated");
+        assert!(value < W, "{value} < {W} violated");
 
         self.px[n] = self
             .cipher
@@ -70,12 +70,12 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
         &self,
         n: usize,
     ) -> <<S as CipherSuite<W, M>>::PRF as PseudoRandomFunction>::BlockType {
-        assert!(n < N, "{} < {} violated", n, N);
+        assert!(n < N, "{n} < {N} violated");
         self.f[n]
     }
 
     pub fn px(&self, n: usize) -> u16 {
-        assert!(n < N, "{} < {} violated", n, N);
+        assert!(n < N, "{n} < {N} violated");
         self.px[n]
     }
 }
@@ -93,27 +93,23 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
 
         for i in 0..N {
             let block = bytes.get((i * f_size)..((i + 1) * f_size)).ok_or_else(|| {
-                Error::ParseError(format!("reached end of data while looking for f[{}]", i))
+                Error::ParseError(format!("reached end of data while looking for f[{i}]"))
             })?;
             f[i] = clone_into_array(block);
 
             px[i] = if W <= 256 {
                 *bytes.get(px_start + i).ok_or_else(|| {
-                    Error::ParseError(format!("reached end of data while looking for px[{}]", i))
+                    Error::ParseError(format!("reached end of data while looking for px[{i}]"))
                 })? as u16
             } else {
                 let px_bytes = bytes
                     .get((px_start + 2 * i)..(px_start + 2 * i + 1))
                     .ok_or_else(|| {
-                        Error::ParseError(format!(
-                            "reached end of data while looking for px[{}]",
-                            i
-                        ))
+                        Error::ParseError(format!("reached end of data while looking for px[{i}]"))
                     })?;
                 u16::from_be_bytes(px_bytes.try_into().map_err(|_| {
                     Error::ParseError(format!(
-                        "failed to convert {:?} into u16 for px[{}]",
-                        px_bytes, i
+                        "failed to convert {px_bytes:?} into u16 for px[{i}]"
                     ))
                 })?)
             }
@@ -195,8 +191,8 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
     }
 
     pub fn set_block(&mut self, n: usize, value: u16) -> Result<(), Error> {
-        assert!(n <= N, "{} <= {} violated", n, N);
-        assert!(value <= W, "{} <= {} violated", value, W);
+        assert!(n <= N, "{n} <= {N} violated");
+        assert!(value <= W, "{value} <= {W} violated");
 
         for i in 0..W {
             let mut b: <<S as CipherSuite<W, M>>::PRF as PseudoRandomFunction>::BlockType =
@@ -225,7 +221,7 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
     }
 
     pub fn nonce(&self, n: usize) -> [u8; 16] {
-        assert!(n < N, "{} < {} violated", n, N);
+        assert!(n < N, "{n} < {N} violated");
         self.nonce_cache[n]
     }
 
@@ -333,7 +329,7 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
         } else if M == 3 {
             Self::unpack_trinary_values(&bytes[16..])?
         } else {
-            panic!("don't know how to unpack bytes for M={}", M);
+            panic!("don't know how to unpack bytes for M={M}");
         };
 
         let mut rct = RightCipherText::<'a, S, CMP, N, W, M> {
@@ -357,7 +353,7 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
         } else if M == 3 {
             self.pack_trinary_values()
         } else {
-            panic!("don't know how to pack values for M={}", M);
+            panic!("don't know how to pack values for M={M}");
         };
 
         v.extend_from_slice(&value_slice);
@@ -434,7 +430,7 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
 
             let res = (v_h as i16 - h_k_r as i16).rem_euclid(M as i16) as u8;
 
-            if res != 0 && result == None {
+            if res != 0 && result.is_none() {
                 result = Some(res);
             }
         }
@@ -465,8 +461,7 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
             v = &v[2..];
             let len = u16::from_be_bytes(len_bytes.try_into().map_err(|_| {
                 Error::ParseError(format!(
-                    "failed to convert {:?} into u16 for left ciphertext length",
-                    len_bytes
+                    "failed to convert {len_bytes:?} into u16 for left ciphertext length"
                 ))
             })?) as usize;
             let left_bytes = v.get(..len).ok_or_else(|| {
@@ -477,7 +472,7 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
                 left_bytes,
             )?)
         } else {
-            return Err(Error::ParseError(format!("unrecognised type byte {}", t)));
+            return Err(Error::ParseError(format!("unrecognised type byte {t}")));
         };
 
         let len_bytes = v.get(..2).ok_or_else(|| {
@@ -486,8 +481,7 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
         v = &v[2..];
         let len = u16::from_be_bytes(len_bytes.try_into().map_err(|_| {
             Error::ParseError(format!(
-                "failed to convert {:?} into u16 for right ciphertext length",
-                len_bytes
+                "failed to convert {len_bytes:?} into u16 for right ciphertext length"
             ))
         })?) as usize;
         let right_bytes = v.get(..len).ok_or_else(|| {
