@@ -20,7 +20,6 @@ macro_rules! from_uint_to_plaintext {
                 let mut p = [0u16; N];
 
                 for i in 0..N {
-                    dbg!(i, N, W, u, stringify!($ty));
                     p[N - i as usize - 1] = (u as u128 % W as u128) as u16;
                     u /= W as u128;
                 }
