@@ -43,6 +43,10 @@ impl BitList {
         r
     }
 
+    pub fn fully_consumed(&self) -> bool {
+        self.curbyte == self.list.len() || (self.curbyte == self.list.len() - 1 && self.bitmask > 1)
+    }
+
     pub fn vec(&self) -> Vec<u8> {
         let mut v = vec![0u8; self.list.len()];
         v.clone_from_slice(&self.list);

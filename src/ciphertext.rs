@@ -245,7 +245,13 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
             }
         }
 
-        Ok(vals)
+        if v.fully_consumed() {
+            Ok(vals)
+        } else {
+            Err(Error::ParseError(
+                "bitlist longer than required number of entries".to_string(),
+            ))
+        }
     }
 
     fn pack_binary_values(&self) -> Vec<u8> {
@@ -288,7 +294,13 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
             }
         }
 
-        Ok(vals)
+        if v.fully_consumed() {
+            Ok(vals)
+        } else {
+            Err(Error::ParseError(
+                "bitlist longer than required number of entries".to_string(),
+            ))
+        }
     }
 
     fn pack_trinary_values(&self) -> Vec<u8> {
@@ -484,12 +496,20 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
                 "failed to convert {len_bytes:?} into u16 for right ciphertext length"
             ))
         })?) as usize;
-        let right_bytes = v.get(..len).ok_or_else(|| {
-            Error::ParseError("end of data while looking for right ciphertext".to_string())
-        })?;
-        let right = RightCipherText::<'a, S, CMP, N, W, M>::from_slice(right_bytes)?;
 
-        Ok(CipherText::<'a, S, CMP, N, W, M> { left, right })
+        if len == v.len() {
+            let right_bytes = v.get(..len).ok_or_else(|| {
+                Error::ParseError("end of data while looking for right ciphertext".to_string())
+            })?;
+            let right = RightCipherText::<'a, S, CMP, N, W, M>::from_slice(right_bytes)?;
+
+            Ok(CipherText::<'a, S, CMP, N, W, M> { left, right })
+        } else {
+            Err(Error::ParseError(format!(
+                "length does not match size in right ciphertext (expected={len}, actual={})",
+                v.len()
+            )))
+        }
     }
 
     fn to_vec(&self) -> Vec<u8> {
@@ -569,6 +589,86 @@ mod tests {
 
             assert_eq!(n1, n_rt);
         }
+
+        #[test]
+        fn cannot_deserialise_full_ciphertext_with_smaller_chunk_count() {
+            let cipher = ere::Cipher::<4, 256>::new(key()).unwrap();
+
+            let n = cipher.full_encrypt(31_337u32.into()).unwrap();
+            let v = n.to_vec();
+
+            assert!(ere::CipherText::<8, 256>::from_slice(&v).is_err());
+        }
+
+        #[test]
+        fn cannot_deserialise_full_ciphertext_with_larger_chunk_count() {
+            let cipher = ere::Cipher::<8, 256>::new(key()).unwrap();
+
+            let n = cipher.full_encrypt(31_337u32.into()).unwrap();
+            let v = n.to_vec();
+
+            assert!(ere::CipherText::<4, 256>::from_slice(&v).is_err());
+        }
+
+        #[test]
+        fn cannot_deserialise_full_ciphertext_with_smaller_chunk_width() {
+            let cipher = ere::Cipher::<4, 16>::new(key()).unwrap();
+
+            let n = cipher.full_encrypt(42u16.into()).unwrap();
+            let v = n.to_vec();
+
+            assert!(ere::CipherText::<4, 256>::from_slice(&v).is_err());
+        }
+
+        #[test]
+        fn cannot_deserialise_full_ciphertext_with_larger_chunk_width() {
+            let cipher = ere::Cipher::<4, 256>::new(key()).unwrap();
+
+            let n = cipher.full_encrypt(42u16.into()).unwrap();
+            let v = n.to_vec();
+
+            assert!(ere::CipherText::<4, 16>::from_slice(&v).is_err());
+        }
+
+        #[test]
+        fn cannot_deserialise_right_ciphertext_with_smaller_chunk_count() {
+            let cipher = ere::Cipher::<4, 256>::new(key()).unwrap();
+
+            let n = cipher.right_encrypt(31_337u32.into()).unwrap();
+            let v = n.to_vec();
+
+            assert!(ere::CipherText::<8, 256>::from_slice(&v).is_err());
+        }
+
+        #[test]
+        fn cannot_deserialise_right_ciphertext_with_larger_chunk_count() {
+            let cipher = ere::Cipher::<8, 256>::new(key()).unwrap();
+
+            let n = cipher.right_encrypt(31_337u32.into()).unwrap();
+            let v = n.to_vec();
+
+            assert!(ere::CipherText::<4, 256>::from_slice(&v).is_err());
+        }
+
+        #[test]
+        fn cannot_deserialise_right_ciphertext_with_smaller_chunk_width() {
+            let cipher = ere::Cipher::<4, 16>::new(key()).unwrap();
+
+            let n = cipher.right_encrypt(42u16.into()).unwrap();
+            let v = n.to_vec();
+
+            assert!(ere::CipherText::<4, 256>::from_slice(&v).is_err());
+        }
+
+        #[test]
+        fn cannot_deserialise_right_ciphertext_with_larger_chunk_width() {
+            let cipher = ere::Cipher::<4, 256>::new(key()).unwrap();
+
+            let n = cipher.right_encrypt(42u16.into()).unwrap();
+            let v = n.to_vec();
+
+            assert!(ere::CipherText::<4, 16>::from_slice(&v).is_err());
+        }
     }
 
     mod ore {
@@ -623,6 +723,86 @@ mod tests {
             assert!(n2f == n2r_rt);
             assert!(n1f < n2r_rt);
             assert!(n2f > n1r_rt);
+        }
+
+        #[test]
+        fn cannot_deserialise_full_ciphertext_with_smaller_chunk_count() {
+            let cipher = ore::Cipher::<4, 256>::new(key()).unwrap();
+
+            let n = cipher.full_encrypt(31_337u32.into()).unwrap();
+            let v = n.to_vec();
+
+            assert!(ore::CipherText::<8, 256>::from_slice(&v).is_err());
+        }
+
+        #[test]
+        fn cannot_deserialise_full_ciphertext_with_larger_chunk_count() {
+            let cipher = ore::Cipher::<8, 256>::new(key()).unwrap();
+
+            let n = cipher.full_encrypt(31_337u32.into()).unwrap();
+            let v = n.to_vec();
+
+            assert!(ore::CipherText::<4, 256>::from_slice(&v).is_err());
+        }
+
+        #[test]
+        fn cannot_deserialise_full_ciphertext_with_smaller_chunk_width() {
+            let cipher = ore::Cipher::<4, 16>::new(key()).unwrap();
+
+            let n = cipher.full_encrypt(42u16.into()).unwrap();
+            let v = n.to_vec();
+
+            assert!(ore::CipherText::<4, 256>::from_slice(&v).is_err());
+        }
+
+        #[test]
+        fn cannot_deserialise_full_ciphertext_with_larger_chunk_width() {
+            let cipher = ore::Cipher::<4, 256>::new(key()).unwrap();
+
+            let n = cipher.full_encrypt(42u16.into()).unwrap();
+            let v = n.to_vec();
+
+            assert!(ore::CipherText::<4, 16>::from_slice(&v).is_err());
+        }
+
+        #[test]
+        fn cannot_deserialise_right_ciphertext_with_smaller_chunk_count() {
+            let cipher = ore::Cipher::<4, 256>::new(key()).unwrap();
+
+            let n = cipher.right_encrypt(31_337u32.into()).unwrap();
+            let v = n.to_vec();
+
+            assert!(ore::CipherText::<8, 256>::from_slice(&v).is_err());
+        }
+
+        #[test]
+        fn cannot_deserialise_right_ciphertext_with_larger_chunk_count() {
+            let cipher = ore::Cipher::<8, 256>::new(key()).unwrap();
+
+            let n = cipher.right_encrypt(31_337u32.into()).unwrap();
+            let v = n.to_vec();
+
+            assert!(ore::CipherText::<4, 256>::from_slice(&v).is_err());
+        }
+
+        #[test]
+        fn cannot_deserialise_right_ciphertext_with_smaller_chunk_width() {
+            let cipher = ore::Cipher::<4, 16>::new(key()).unwrap();
+
+            let n = cipher.right_encrypt(42u16.into()).unwrap();
+            let v = n.to_vec();
+
+            assert!(ore::CipherText::<4, 256>::from_slice(&v).is_err());
+        }
+
+        #[test]
+        fn cannot_deserialise_right_ciphertext_with_larger_chunk_width() {
+            let cipher = ore::Cipher::<4, 256>::new(key()).unwrap();
+
+            let n = cipher.right_encrypt(42u16.into()).unwrap();
+            let v = n.to_vec();
+
+            assert!(ore::CipherText::<4, 16>::from_slice(&v).is_err());
         }
     }
 }
