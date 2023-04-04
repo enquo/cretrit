@@ -53,7 +53,7 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
     }
 
     pub fn set_block(&mut self, n: usize, value: u16) {
-        assert!(n <= N, "{n} <= {N} violated");
+        assert!(n < N, "{n} < {N} violated");
         assert!(value < W, "{value} < {W} violated");
 
         self.px[n] = self
@@ -191,8 +191,8 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
     }
 
     pub fn set_block(&mut self, n: usize, value: u16) -> Result<(), Error> {
-        assert!(n <= N, "{n} <= {N} violated");
-        assert!(value <= W, "{value} <= {W} violated");
+        assert!(n < N, "{n} < {N} violated");
+        assert!(value < W, "{value} < {W} violated");
 
         for i in 0..W {
             let mut b: <<S as CipherSuite<W, M>>::PRF as PseudoRandomFunction>::BlockType =
@@ -443,6 +443,8 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
             let res = (v_h as i16 - h_k_r as i16).rem_euclid(M as i16) as u8;
 
             if res != 0 && result.is_none() {
+                // Returning early here would further damage our attempts to
+                // do constant-time comparisons
                 result = Some(res);
             }
         }
