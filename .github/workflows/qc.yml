@@ -28,6 +28,8 @@ jobs:
           key: ${{ runner.os }}-${{ steps.rust-install.outputs.rustc_hash}}-cargo
 
       - name: Run testsuite
+        env:
+          RUSTFLAGS="-D warnings"
         run: |
           cargo test
 

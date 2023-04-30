@@ -25,6 +25,7 @@ If you believe you have found a security flaw in this library, an e-mail to `sec
 
 To use the existing ordering and equality types, you just have to select a *cipher suite*, and then `use` the module in that cipher suite that corresponds to the operation you wish to perform.
 At present, only one cipher suite is available, named `aes128v1`, and there are `ore` (order-revealing encryption) and `ere` (equality-revealing encryption) modules.
+
 From there, you instantiate a `Cipher` whose generic parameters represent the number of blocks (`N`) and the "width" of each block (the number of values representable by each block, `W`), giving it a key to use for encryption.
 For example:
 
@@ -32,40 +33,48 @@ For example:
 // Let's do some order-revealing encryption!
 use cretrit::aes128v1::ore;
 
+# fn main() -> Result<(), cretrit::Error> {
 // This cipher has four blocks, the value of each is in the range
 // 0-255.  Hence, this cipher can represent the ordering of values
 // between 0 and 256^4-1 (aka 2**32-1), which corresponds to a 32-bit
 // unsigned integer.
 // The `[0; u16]` is the key; for real-world usage, use a cryptographically-secure key, please!
-let cipher = ore::Cipher::<4, 256>::new([0u8; 16]).unwrap();
+let cipher = ore::Cipher::<4, 256>::new([0u8; 16])?;
+# Ok(())
+# }
 ```
 
 This cipher is how you encrypt plaintexts.
 Internally, plaintexts are an array of the value of each block, and you can use that representation if you like.
-For encrypting unsigned integers, there are implementations of the `From` trait that allow you to pass the integers in directly, like this:
+For encrypting unsigned integers, there are implementations of the `TryFrom` trait that allow you to pass the integers in directly, like this:
 
 ```rust
 # use cretrit::aes128v1::ore;
-# let cipher = ore::Cipher::<4, 256>::new([0u8; 16]).unwrap();
-
+# fn main() -> Result<(), cretrit::Error> {
+# let cipher = ore::Cipher::<4, 256>::new([0u8; 16])?;
 let forty_two: u32 = 42;
-let ore_forty_two = cipher.full_encrypt(forty_two.into()).unwrap();
+let ore_forty_two = cipher.full_encrypt(&forty_two.try_into()?)?;
 let over_nine_thousand: u32 = 9001;
-let ore_over_nine_thousand = cipher.full_encrypt(over_nine_thousand.into()).unwrap();
+let ore_over_nine_thousand = cipher.full_encrypt(&over_nine_thousand.try_into()?)?;
+# Ok(())
+# }
 ```
+
+If the value you're trying to turn into a plaintext can't be represented by the plaintext type you're using, a `cretrit::Error::RangeError` will be returned.
 
 Ciphertexts for the order-revealing and equality-revealing encryption schemes implement `Ord`, `Eq`, and the `Partial*` variants as appropriate.
 Thus, you can just compare the outputs of the `encrypt` function like they were any other value:
 
 ```rust
 # use cretrit::aes128v1::ore;
-# let cipher = ore::Cipher::<4, 256>::new([0u8; 16]).unwrap();
-
-# let ore_forty_two = cipher.full_encrypt(42u32.into()).unwrap();
-# let ore_over_nine_thousand = cipher.full_encrypt(9001u32.into()).unwrap();
-
+# fn main() -> Result<(), cretrit::Error> {
+# let cipher = ore::Cipher::<4, 256>::new([0u8; 16])?;
+# let ore_forty_two = cipher.full_encrypt(&42u32.try_into()?)?;
+# let ore_over_nine_thousand = cipher.full_encrypt(&9001u32.try_into()?)?;
 assert!(ore_forty_two != ore_over_nine_thousand);
 assert!(ore_forty_two < ore_over_nine_thousand);
+# Ok(())
+# }
 ```
 
 You can also serialise and deserialise ciphertexts to/from `u8` vectors, which allows you to store them in files, databases, etc.
@@ -76,21 +85,23 @@ A simple example of round-tripping a ciphertext:
 use cretrit::SerializableCipherText;
 
 # use cretrit::aes128v1::ore;
-# let cipher = ore::Cipher::<4, 256>::new([0u8; 16]).unwrap();
-# let ore_forty_two = cipher.full_encrypt(42u32.into()).unwrap();
-# let ore_over_nine_thousand = cipher.full_encrypt(9001u32.into()).unwrap();
-
-let v = ore_forty_two.to_vec();
+# fn main() -> Result<(), cretrit::Error> {
+# let cipher = ore::Cipher::<4, 256>::new([0u8; 16])?;
+# let ore_forty_two = cipher.full_encrypt(&42u32.try_into()?)?;
+# let ore_over_nine_thousand = cipher.full_encrypt(&9001u32.try_into()?)?;
+let v = ore_forty_two.to_vec()?;
 
 // When deserialising a ciphertext, you need to specify the cipher parameters
 // so that the types line up.
-let new_forty_two = ore::CipherText::<4, 256>::from_slice(&v).unwrap();
+let new_forty_two = ore::CipherText::<4, 256>::from_slice(&v)?;
 
 // Once it's deserialised, it's back to its original form and ready to
 // go!
 assert!(new_forty_two == ore_forty_two);
 assert!(new_forty_two != ore_over_nine_thousand);
 assert!(new_forty_two < ore_over_nine_thousand);
+# Ok(())
+# }
 ```
 
 

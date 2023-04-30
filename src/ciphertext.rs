@@ -1,6 +1,8 @@
+//! An encrypted, comparable data type.
+
 use std::convert::AsMut;
 
-use crate::bitlist::BitList;
+use crate::bitlist::{ReadableBitList, WritableBitList};
 use crate::cipher::Cipher;
 use crate::ciphersuite::CipherSuite;
 use crate::cmp::Comparator;
@@ -9,14 +11,62 @@ use crate::hash::HashFunction;
 use crate::kbkdf::KBKDF;
 use crate::plaintext::PlainText;
 use crate::prf::PseudoRandomFunction;
+use crate::util::check_overflow;
 
+/// Provide the ability to serialise/deserialise a ciphertext
+///
+/// Convert a [`CipherText`] to/from a sequence of bytes suitable for storage or transmission.
+///
 pub trait Serializable<const N: usize, const W: u16, const M: u8> {
+    /// Parse the [`CipherText`](super::CipherText) data out of a slice of bytes.
+    ///
+    /// Since a `CipherText`'s exact structure is dependent on the various parameters that went into
+    /// creating it, deserialising it goes through the ciphersuite-specific module's `CipherText`
+    /// type (such as, for example, [`aes128v1::ore::CipherText`](crate::aes128v1::ore::CipherText)
+    /// which itself needs to know the number of blocks and "width" of each block, specified in the
+    /// type parameters provided.  It all gets very messy behind the scenes.
+    ///
+    /// # Examples
+    ///
+    /// Deserialising a ciphertext for an order-revealing, aes128v1-encrypted, `u32` which has been
+    /// chopped up into four blocks with a width of 256 (ie 8 bits):
+    ///
+    /// ```rust
+    /// use cretrit::aes128v1::ore;
+    /// use cretrit::SerializableCipherText;
+    ///
+    /// # fn main() -> Result<(), cretrit::Error> {
+    /// # let key = [0u8; 16];
+    /// # let cipher = ore::Cipher::<4, 256>::new(key)?;
+    /// # let forty_two = cipher.full_encrypt(&42u32.try_into()?)?;
+    /// # let serialised_ciphertext = forty_two.to_vec()?;
+    /// // Assuming serialised_ciphertext is a Vec<u8> or similar...
+    /// let ct = ore::CipherText::<4, 256>::from_slice(&serialised_ciphertext)?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Will return an error if passed something that isn't a legitimate ciphertext for the given
+    /// block count and width, either because N/W is wrong, or because the ciphertext is corrupted
+    /// in some way.
+    ///
     fn from_slice(bytes: &[u8]) -> Result<Self, Error>
     where
         Self: Sized;
-    fn to_vec(&self) -> Vec<u8>;
+
+    /// Serialise a [`CipherText`](super::CipherText) into a vector of bytes.
+    ///
+    /// # Errors
+    ///
+    /// The only time an error should be returned, really, is when there was a bug in the
+    /// serialisation implementation.
+    ///
+    fn to_vec(&self) -> Result<Vec<u8>, Error>;
 }
 
+/// Rust is weird sometimes.
 fn clone_into_array<A, T>(slice: &[T]) -> A
 where
     A: Sized + Default + AsMut<[T]>,
@@ -27,8 +77,9 @@ where
     a
 }
 
+/// A generic large-domain left ciphertext for the Lewi-Wu comparison-revealing encryption scheme.
 #[derive(Debug)]
-pub struct LeftCipherText<
+pub(crate) struct LeftCipherText<
     'a,
     S: CipherSuite<W, M>,
     CMP: Comparator<M>,
@@ -36,15 +87,20 @@ pub struct LeftCipherText<
     const W: u16,
     const M: u8,
 > {
+    /// The F(k, p(x)) for each block in the large-domain left ciphertext
     f: [<<S as CipherSuite<W, M>>::PRF as PseudoRandomFunction>::BlockType; N],
+    /// The p(x) for each block in the large-domain left ciphertext
     px: [u16; N],
+    /// The cipher being used to construct this left ciphertext, or None if this ciphertext came
+    /// from deserialisation (in which case it can't be modified, only compared)
     cipher: Option<&'a Cipher<S, CMP, N, W, M>>,
 }
 
 impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16, const M: u8>
     LeftCipherText<'a, S, CMP, N, W, M>
 {
-    pub fn new(cipher: &'a Cipher<S, CMP, N, W, M>) -> Self {
+    /// Create a new, blank left ciphertext, ready for writing a value into
+    pub(crate) fn new(cipher: &'a Cipher<S, CMP, N, W, M>) -> Self {
         LeftCipherText {
             f: [Default::default(); N],
             px: [0; N],
@@ -52,36 +108,69 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
         }
     }
 
-    pub fn set_block(&mut self, n: usize, value: u16) {
-        assert!(n < N, "{n} < {N} violated");
-        assert!(value < W, "{value} < {W} violated");
+    /// Encrypt the block value into the `n`th block of the left ciphertext
+    pub(crate) fn set_block(&mut self, n: usize, value: u16) -> Result<(), Error> {
+        if n >= N {
+            return Err(Error::RangeError(format!(
+                "attempted to write to the {n}th block of {N} in left ciphertext"
+            )));
+        }
+        if value >= W {
+            return Err(Error::RangeError(format!("attempted to write a value {value} greater than the left ciphertext block width {W}")));
+        }
 
-        self.px[n] = self
-            .cipher
-            .expect("attempted to set_block on a read-only left ciphertext")
-            .permuted_value(value);
+        let cipher = self.cipher.ok_or_else(|| {
+            Error::InternalError(
+                "attempted to set_block on a read-only left ciphertext".to_string(),
+            )
+        })?;
 
-        self.cipher
-            .unwrap()
-            .pseudorandomise(self.px[n], &mut self.f[n]);
+        let permuted_value = cipher.permuted_value(value)?;
+
+        let px_n_ref = self
+            .px
+            .get_mut(n)
+            .ok_or_else(|| Error::InternalError(format!("failed to write to px[{n}]")))?;
+        *px_n_ref = permuted_value;
+        let f_n = self
+            .f
+            .get_mut(n)
+            .ok_or_else(|| Error::InternalError(format!("failed to get f[{n}]")))?;
+        cipher.pseudorandomise(permuted_value, f_n);
+
+        Ok(())
     }
 
-    pub fn f(
+    /// Retrieve the F(k, p(x)) value for the `n`th block of the left ciphertext
+    pub(crate) fn f(
         &self,
         n: usize,
-    ) -> <<S as CipherSuite<W, M>>::PRF as PseudoRandomFunction>::BlockType {
-        assert!(n < N, "{n} < {N} violated");
-        self.f[n]
+    ) -> Result<<<S as CipherSuite<W, M>>::PRF as PseudoRandomFunction>::BlockType, Error> {
+        self.f
+            .get(n)
+            .ok_or_else(|| {
+                Error::RangeError(format!(
+                    "attempted to read the {n}th F(k, p(x)) of {N} in left ciphertext"
+                ))
+            })
+            .copied()
     }
 
-    pub fn px(&self, n: usize) -> u16 {
-        assert!(n < N, "{n} < {N} violated");
-        self.px[n]
+    /// Retrieve the p(x) value for the `n`th block of the left ciphertext
+    pub(crate) fn px(&self, n: usize) -> Result<u16, Error> {
+        self.px
+            .get(n)
+            .ok_or_else(|| {
+                Error::RangeError(format!(
+                    "attempted to read the {n}th p(x) of {N} in left ciphertext"
+                ))
+            })
+            .copied()
     }
 }
 
-impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16, const M: u8>
-    Serializable<N, W, M> for LeftCipherText<'a, S, CMP, N, W, M>
+impl<S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16, const M: u8>
+    Serializable<N, W, M> for LeftCipherText<'_, S, CMP, N, W, M>
 {
     fn from_slice(bytes: &[u8]) -> Result<Self, Error> {
         let mut f: [<<S as CipherSuite<W, M>>::PRF as PseudoRandomFunction>::BlockType; N] =
@@ -89,30 +178,57 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
         // Like I'm typing this out more often than I absolutely need to...
         let f_size = <<S as CipherSuite<W, M>>::PRF as PseudoRandomFunction>::BLOCK_SIZE;
         let mut px = [0u16; N];
-        let px_start = N * f_size;
+        let px_start = check_overflow(
+            N.overflowing_mul(f_size),
+            &format!("overflow while calculating px_start (N={N}*f_size={f_size})"),
+        )?;
 
         for i in 0..N {
-            let block = bytes.get((i * f_size)..((i + 1) * f_size)).ok_or_else(|| {
-                Error::ParseError(format!("reached end of data while looking for f[{i}]"))
+            let first_byte = check_overflow(
+                i.overflowing_mul(f_size),
+                &format!("overflow while calculating first byte of block (i={i}*f_size={f_size})"),
+            )?;
+            let last_byte = check_overflow(first_byte.overflowing_add(f_size), &format!("overflow while calculating last byte of block (first_byte={first_byte}+f_size={f_size})"))?;
+            let block = bytes.get(first_byte..last_byte).ok_or_else(|| {
+                Error::ParseError(format!("end-of-data while looking for f[{i}]"))
             })?;
-            f[i] = clone_into_array(block);
+            let f_i_ref = f.get_mut(i).ok_or_else(|| {
+                Error::ParseError(format!("could not get f[{i}] to write block into"))
+            })?;
+            *f_i_ref = clone_into_array(block);
 
-            px[i] = if W <= 256 {
-                *bytes.get(px_start + i).ok_or_else(|| {
-                    Error::ParseError(format!("reached end of data while looking for px[{i}]"))
-                })? as u16
+            let px_i = if W <= 256 {
+                u16::from(
+                    *bytes
+                        .get(check_overflow(
+                            px_start.overflowing_add(i),
+                            &format!("overflow while adding i={i} to px_start={px_start}"),
+                        )?)
+                        .ok_or_else(|| {
+                            Error::ParseError(format!("end-of-data while looking for px[{i}]"))
+                        })?,
+                )
             } else {
-                let px_bytes = bytes
-                    .get((px_start + 2 * i)..(px_start + 2 * i + 1))
-                    .ok_or_else(|| {
-                        Error::ParseError(format!("reached end of data while looking for px[{i}]"))
-                    })?;
-                u16::from_be_bytes(px_bytes.try_into().map_err(|_| {
+                let px_loc = check_overflow(
+                    px_start.overflowing_add(check_overflow(
+                        i.overflowing_add(2),
+                        &format!(
+                            "overflow while multiplying i={i} by 2 in LeftCipherText::from_slice"
+                        ),
+                    )?),
+                    &format!("overflow while adding px_start={px_start} to 2*{i}"),
+                )?;
+                let px_bytes = bytes.get(px_loc..=px_loc).ok_or_else(|| {
+                    Error::ParseError(format!("end-of-data while looking for px[{i}]"))
+                })?;
+                u16::from_be_bytes(px_bytes.try_into().map_err(|e| {
                     Error::ParseError(format!(
-                        "failed to convert {px_bytes:?} into u16 for px[{i}]"
+                        "failed to convert {px_bytes:?} into u16 for px[{i}] ({e})"
                     ))
                 })?)
-            }
+            };
+            let px_i_ref = px.get_mut(i).ok_or_else(|| Error::InternalError(format!("failed to get {i}th element of px array (which is supposed to have {N} elements)")))?;
+            *px_i_ref = px_i;
         }
 
         Ok(Self {
@@ -122,28 +238,39 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
         })
     }
 
-    fn to_vec(&self) -> Vec<u8> {
+    fn to_vec(&self) -> Result<Vec<u8>, Error> {
         let f_size = <<S as CipherSuite<W, M>>::PRF as PseudoRandomFunction>::BLOCK_SIZE;
 
-        let mut v: Vec<u8> = Vec::with_capacity(N * (f_size + 2));
+        let mut v: Vec<u8> = Vec::with_capacity(N.saturating_mul(f_size.saturating_add(2)));
 
         for n in 0..N {
-            v.extend_from_slice(&self.f[n].into());
+            v.extend_from_slice(
+                &(*self.f.get(n).ok_or_else(|| {
+                    Error::RangeError(format!(
+                        "failed to get {n}th F(k, p(x)) from left ciphertext"
+                    ))
+                })?)
+                .into(),
+            );
         }
         for n in 0..N {
+            let px_n = self.px.get(n).ok_or_else(|| {
+                Error::RangeError(format!("failed to get {n}th p(x) from left ciphertext"))
+            })?;
             if W <= 256 {
-                v.extend_from_slice(&(self.px[n] as u8).to_be_bytes());
+                v.extend_from_slice(&(u8::try_from(*px_n).map_err(|e| Error::InternalError(format!("failed to convert {px_n} to u8, even though it's supposed to be within range ({e})")))?).to_be_bytes());
             } else {
-                v.extend_from_slice(&self.px[n].to_be_bytes());
+                v.extend_from_slice(&(*px_n).to_be_bytes());
             }
         }
 
-        v
+        Ok(v)
     }
 }
 
+/// A generic large-domain right ciphertext for the Lewi-Wu comparison-revealing encryption scheme.
 #[derive(Debug)]
-pub struct RightCipherText<
+pub(crate) struct RightCipherText<
     'a,
     S: CipherSuite<W, M>,
     CMP: Comparator<M>,
@@ -151,16 +278,22 @@ pub struct RightCipherText<
     const W: u16,
     const M: u8,
 > {
+    /// The base nonce from which the per-block nonces are derived
     nonce_base: [u8; 16],
+    /// Cached copies of the per-block nonces
     nonce_cache: [[u8; 16]; N],
+    /// The v_i sequences for each block
     values: Vec<Vec<u8>>,
+    /// The cipher instance with which to encrypt the blocks if we're writing, or None if this
+    /// ciphertext came from deserialisation (in which case it cannot be written, only compared)
     cipher: Option<&'a Cipher<S, CMP, N, W, M>>,
 }
 
 impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16, const M: u8>
     RightCipherText<'a, S, CMP, N, W, M>
 {
-    pub fn new(cipher: &'a Cipher<S, CMP, N, W, M>) -> Result<Self, Error> {
+    /// Spawn a new right ciphertext, ready to have its blocks written
+    pub(crate) fn new(cipher: &'a Cipher<S, CMP, N, W, M>) -> Result<Self, Error> {
         let values: Vec<Vec<u8>> = (0..N).map(|_| vec![0u8; W as usize]).collect();
         let mut rct = RightCipherText {
             nonce_base: Default::default(),
@@ -176,73 +309,119 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
         Ok(rct)
     }
 
+    /// Generate the per-block nonces and cache them so we don't have to generate them every time
+    /// we want to read them
     fn cache_nonces(rct: &mut RightCipherText<'a, S, CMP, N, W, M>) -> Result<(), Error> {
-        let ndf = KBKDF::new(rct.nonce_base)?;
+        let ndf = KBKDF::new(rct.nonce_base);
 
         for i in 0..N {
             let mut k = Vec::<u8>::with_capacity(11);
             k.extend_from_slice(b"RCTnonce.");
-            k.extend_from_slice(&(i as u16).to_be_bytes());
+            k.extend_from_slice(
+                &(u16::try_from(i).map_err(|e| {
+                    Error::RangeError(format!("failed to convert {i} to u16 ({e})"))
+                })?)
+                .to_be_bytes(),
+            );
 
-            ndf.derive_key(&mut rct.nonce_cache[i], &k)?;
+            ndf.derive_key(
+                rct.nonce_cache.get_mut(i).ok_or_else(|| {
+                    Error::RangeError(format!("failed to get {i}th nonce from cache"))
+                })?,
+                &k,
+            )?;
         }
 
         Ok(())
     }
 
-    pub fn set_block(&mut self, n: usize, value: u16) -> Result<(), Error> {
-        assert!(n < N, "{n} < {N} violated");
-        assert!(value < W, "{value} < {W} violated");
+    /// Encrypt the value provided into the `n`th block of the right ciphertext
+    pub(crate) fn set_block(&mut self, n: usize, value: u16) -> Result<(), Error> {
+        if n >= N {
+            return Err(Error::RangeError(format!(
+                "attempted to write to the {n}th block of {N} in right ciphertext"
+            )));
+        }
+        if value >= W {
+            return Err(Error::RangeError(format!("attempted to write a value {value} greater than the right ciphertext block width {W}")));
+        }
+        let cipher = self.cipher.ok_or_else(|| {
+            Error::InternalError(
+                "attempted to set_block on a read-only right ciphertext".to_string(),
+            )
+        })?;
 
         for i in 0..W {
             let mut b: <<S as CipherSuite<W, M>>::PRF as PseudoRandomFunction>::BlockType =
                 Default::default();
 
-            self.cipher
-                .expect("set_block called on a read-only right ciphertext")
-                .pseudorandomise(i, &mut b);
+            cipher.pseudorandomise(i, &mut b);
 
-            let v = self
-                .cipher
-                .unwrap()
-                .compare_values(self.cipher.unwrap().inverse_permuted_value(i), value)
-                + self
-                    .cipher
-                    .unwrap()
-                    .hashed_value(&b.into(), &self.nonce(n))?;
-            self.values[n][i as usize] = v % M;
+            let p_i_y = CMP::compare(cipher.inverse_permuted_value(i)?, value);
+            let nonce = self.nonce(n)?;
+            let h_f_r = <<S as CipherSuite<W, M>>::HF as HashFunction<M>>::hash(&b.into(), &nonce)?;
+
+            // Absolutely *shits* me that we can't get this ref once at the top of the function;
+            // nope, gotta deref it on every loop to keep the borrow checker happy
+            let block_values = self.values.get_mut(n).ok_or_else(|| {
+                Error::RangeError(format!(
+                    "attempted to set_block on {n}th block of {N} of right ciphertext"
+                ))
+            })?;
+            let v_ref = block_values.get_mut(usize::from(i)).ok_or_else(|| {
+                Error::RangeError(format!("couldn't set {i}th value of {n}th block"))
+            })?;
+            *v_ref = check_overflow(p_i_y.overflowing_add(h_f_r), &format!("overflow while attempting to add right ciphertext value components p_i_y={p_i_y}, h_f_r={h_f_r}"))?.rem_euclid(M);
         }
 
         Ok(())
     }
 
-    pub fn value(&self, n: usize, px: u16) -> u8 {
-        self.values[n][px as usize]
+    /// Fetch the value of the `px`th element in the `n`th block of the [`RightCipherText`].
+    ///
+    pub(crate) fn value(&self, n: usize, px: u16) -> Result<u8, Error> {
+        self.values
+            .get(n)
+            .ok_or_else(|| {
+                Error::RangeError(format!(
+                    "attempted to get the values of the {n}th block of {N}"
+                ))
+            })?
+            .get(usize::from(px))
+            .ok_or_else(|| {
+                Error::RangeError(format!("couldn't get the {px}th value of the {n}th block"))
+            })
+            .copied()
     }
 
-    pub fn nonce(&self, n: usize) -> [u8; 16] {
-        assert!(n < N, "{n} < {N} violated");
-        self.nonce_cache[n]
+    /// Fetch the nonce for the `n`th block of the [`RightCipherText`].
+    ///
+    pub(crate) fn nonce(&self, n: usize) -> Result<[u8; 16], Error> {
+        self.nonce_cache
+            .get(n)
+            .ok_or_else(|| {
+                Error::RangeError(format!("attempted to get the {n}th nonce of {N} blocks"))
+            })
+            .copied()
     }
 
+    /// Decode a packed set of binary values into the nested vector-of-vectors that is the
+    /// in-memory representation of the values arrays in the right ciphertext.
     fn unpack_binary_values(bytes: &[u8]) -> Result<Vec<Vec<u8>>, Error> {
-        let mut v = BitList::from_slice(bytes);
+        let mut v = ReadableBitList::from_slice(bytes);
         let mut vals: Vec<Vec<u8>> = Vec::with_capacity(N);
 
-        for n in 0..N {
-            vals.push(Vec::with_capacity(W.into()));
+        for _n in 0..N {
+            let mut block_vals = Vec::with_capacity(W.into());
             for _w in 0..W {
-                let b = if v.shift().ok_or_else(|| {
+                let b = u8::from(v.shift().ok_or_else(|| {
                     Error::ParseError(
                         "end-of-data reached while unpacking binary values".to_string(),
                     )
-                })? {
-                    1
-                } else {
-                    0
-                };
-                vals[n].push(b);
+                })?);
+                block_vals.push(b);
             }
+            vals.push(block_vals);
         }
 
         if v.fully_consumed() {
@@ -254,24 +433,40 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
         }
     }
 
-    fn pack_binary_values(&self) -> Vec<u8> {
-        let mut v = BitList::new(N * W as usize);
+    /// Jam all of the binary values for this ciphertext into a byte vector, in such a way that
+    /// they take up a *lot* less space than they would if we just wrote out each value as a u8.
+    fn pack_binary_values(&self) -> Result<Vec<u8>, Error> {
+        let mut v = WritableBitList::new(N.saturating_mul(usize::from(W)));
 
         for n in 0..N {
             for w in 0..W {
-                v.push(self.values[n][w as usize] > 0);
+                let val = self
+                    .values
+                    .get(n)
+                    .ok_or_else(|| {
+                        Error::RangeError(format!(
+                            "could not get value list for {n}th block because it wasn't there"
+                        ))
+                    })?
+                    .get(usize::from(w))
+                    .ok_or_else(|| {
+                        Error::RangeError(format!("could not get {w}th value from {n}th block"))
+                    })?;
+                v.push(*val > 0)?;
             }
         }
 
-        v.vec()
+        Ok(v.vec())
     }
 
+    /// Decode a packed set of trinary values into the nested vector-of-vectors that is the
+    /// in-memory representation of the values arrays in the right ciphertext.
     fn unpack_trinary_values(bytes: &[u8]) -> Result<Vec<Vec<u8>>, Error> {
-        let mut v = BitList::from_slice(bytes);
+        let mut v = ReadableBitList::from_slice(bytes);
         let mut vals: Vec<Vec<u8>> = Vec::with_capacity(N);
 
-        for n in 0..N {
-            vals.push(Vec::with_capacity(W.into()));
+        for _n in 0..N {
+            let mut block_vals = Vec::with_capacity(W.into());
             for _w in 0..W {
                 let b = if v.shift().ok_or_else(|| {
                     Error::ParseError(
@@ -290,8 +485,9 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
                 } else {
                     0
                 };
-                vals[n].push(b);
+                block_vals.push(b);
             }
+            vals.push(block_vals);
         }
 
         if v.fully_consumed() {
@@ -303,28 +499,40 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
         }
     }
 
-    fn pack_trinary_values(&self) -> Vec<u8> {
-        // This capacity calculation is excessive, but safe
-        let mut v = BitList::new(N * W as usize * 2);
+    /// Jam all of the trinary values for this ciphertext into a byte vector, in such a way that
+    /// they take up a *lot* less space than they would if we just wrote out each value as a u8.
+    fn pack_trinary_values(&self) -> Result<Vec<u8>, Error> {
+        let mut v = WritableBitList::new(N.saturating_mul(usize::from(W).saturating_mul(2usize)));
 
         for n in 0..N {
             for w in 0..W {
-                let val = self.values[n][w as usize];
+                let val = self
+                    .values
+                    .get(n)
+                    .ok_or_else(|| {
+                        Error::RangeError(format!(
+                            "could not get value list for {n}th block because it wasn't there"
+                        ))
+                    })?
+                    .get(usize::from(w))
+                    .ok_or_else(|| {
+                        Error::RangeError(format!("could not get {w}th value from {n}th block"))
+                    })?;
 
-                if val == 0 {
-                    v.push(false);
+                if *val == 0 {
+                    v.push(false)?;
                 } else {
-                    v.push(true);
-                    if val > 1 {
-                        v.push(true);
+                    v.push(true)?;
+                    if *val > 1 {
+                        v.push(true)?;
                     } else {
-                        v.push(false);
+                        v.push(false)?;
                     }
                 }
             }
         }
 
-        v.vec()
+        Ok(v.vec())
     }
 }
 
@@ -336,13 +544,18 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
             Error::ParseError("end-of-data found while looking for nonce base".to_string())
         })?);
 
+        let value_slice = bytes.get(16..).ok_or_else(|| {
+            Error::ParseError("end-of-data found while looking for value bitlist".to_string())
+        })?;
         let values = if M == 2 {
-            Self::unpack_binary_values(&bytes[16..])?
+            Self::unpack_binary_values(value_slice)
         } else if M == 3 {
-            Self::unpack_trinary_values(&bytes[16..])?
+            Self::unpack_trinary_values(value_slice)
         } else {
-            panic!("don't know how to unpack bytes for M={M}");
-        };
+            Err(Error::RangeError(format!(
+                "don't know how to unpack bytes for M={M}"
+            )))
+        }?;
 
         let mut rct = RightCipherText::<'a, S, CMP, N, W, M> {
             nonce_base,
@@ -355,8 +568,10 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
         Ok(rct)
     }
 
-    fn to_vec(&self) -> Vec<u8> {
-        let mut v: Vec<u8> = Vec::with_capacity(16 + N * W as usize / 4);
+    fn to_vec(&self) -> Result<Vec<u8>, Error> {
+        let mut v: Vec<u8> = Vec::with_capacity(
+            16usize.saturating_add(N.saturating_mul(usize::from(W).saturating_div(4usize))),
+        );
 
         v.extend_from_slice(&self.nonce_base);
 
@@ -365,15 +580,20 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
         } else if M == 3 {
             self.pack_trinary_values()
         } else {
-            panic!("don't know how to pack values for M={M}");
-        };
+            Err(Error::RangeError(format!(
+                "don't know how to pack values for M={M}"
+            )))
+        }?;
 
         v.extend_from_slice(&value_slice);
 
-        v
+        Ok(v)
     }
 }
 
+/// A Comparison-Revealing Encrypted value.
+///
+#[doc = include_str!("../doc/ciphertexts.md")]
 #[derive(Debug)]
 pub struct CipherText<
     'a,
@@ -383,14 +603,25 @@ pub struct CipherText<
     const W: u16,
     const M: u8,
 > {
-    pub left: Option<LeftCipherText<'a, S, CMP, N, W, M>>,
-    pub right: RightCipherText<'a, S, CMP, N, W, M>,
+    /// The left part of the ciphertext, or None if this is a IND-CPA secure ciphertext
+    pub(crate) left: Option<LeftCipherText<'a, S, CMP, N, W, M>>,
+    /// The right side of the ciphertext
+    pub(crate) right: RightCipherText<'a, S, CMP, N, W, M>,
 }
 
 impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16, const M: u8>
     CipherText<'a, S, CMP, N, W, M>
 {
-    pub fn new(
+    /// Encrypt the plaintext to produce a new comparable ciphertext.
+    ///
+    /// This produces a ciphertext that contains both the "left" and "right" parts, which are
+    /// required in order to perform a comparison.  However, the "left" ciphertext is
+    /// deterministic, so if the same value is encrypted multiple times with the same key, the
+    /// "left" ciphertext will always be the same.  This makes storing "left" ciphertexts somewhat
+    /// problematic, because it means that an attacker who makes off with your database of "left"
+    /// ciphertexts can perform correlation attacks to try and figure out what values are.
+    ///
+    pub(crate) fn new(
         cipher: &'a Cipher<S, CMP, N, W, M>,
         plaintext: &PlainText<N, W>,
     ) -> Result<Self, Error> {
@@ -398,8 +629,8 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
         let mut right = RightCipherText::new(cipher)?;
 
         for n in 0..N {
-            left.set_block(n, plaintext.block(n));
-            right.set_block(n, plaintext.block(n))?;
+            left.set_block(n, plaintext.block(n)?)?;
+            right.set_block(n, plaintext.block(n)?)?;
         }
 
         Ok(CipherText {
@@ -408,20 +639,33 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
         })
     }
 
-    pub fn new_right(
+    /// Encrypt the plaintext to produce a new ciphertext that only contains a "right" ciphertext.
+    ///
+    /// In the Lewi-Wu ORE scheme, a "left" ciphertext must be compared with a "right" ciphertext
+    /// in order for a comparison to be performed.  Producing a ciphertext that only contains a
+    /// "right" ciphertext means that you have something that cannot be directly compared to other
+    /// "right" ciphertexts, but it does have the useful property of being [IND-CPA
+    /// secure](https://en.wikipedia.org/wiki/Ciphertext_indistinguishability).
+    ///
+    pub(crate) fn new_right(
         cipher: &'a Cipher<S, CMP, N, W, M>,
         plaintext: &PlainText<N, W>,
     ) -> Result<Self, Error> {
         let mut right = RightCipherText::new(cipher)?;
 
         for n in 0..N {
-            right.set_block(n, plaintext.block(n))?;
+            right.set_block(n, plaintext.block(n)?)?;
         }
 
         Ok(CipherText { left: None, right })
     }
 
-    pub fn compare(&self, other: &Self) -> Result<u8, Error> {
+    /// Generic comparison function between [`CipherText`]s.
+    ///
+    /// Comparison in the Lewi-Wu ORE scheme produces an integer result, and it is up to the
+    /// comparator to interpret that integer into something meaningful for the given comparator.
+    ///
+    pub(crate) fn compare(&self, other: &Self) -> Result<u8, Error> {
         match &self.left {
             None => Err(Error::ComparisonError(
                 "No left part in this ciphertext".to_string(),
@@ -430,6 +674,11 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
         }
     }
 
+    /// Compare two ciphertexts
+    ///
+    /// Returns the numeric comparison value, which needs to be run through the comparator's invert
+    /// function in order to convert that into a "proper" logical comparison value.
+    ///
     fn compare_parts(
         left: &LeftCipherText<'a, S, CMP, N, W, M>,
         right: &RightCipherText<'a, S, CMP, N, W, M>,
@@ -437,10 +686,14 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
         let mut result: Option<u8> = None;
 
         for n in 0..N {
-            let v_h = right.value(n, left.px(n));
-            let h_k_r = S::HF::hash(&left.f(n).into(), &right.nonce(n))?;
+            let v_h = check_overflow(
+                right.value(n, left.px(n)?)?.overflowing_add(M),
+                "overflow while adding M to v_h",
+            )?;
+            let h_k_r = S::HF::hash(&left.f(n)?.into(), &right.nonce(n)?)?;
 
-            let res = (v_h as i16 - h_k_r as i16).rem_euclid(M as i16) as u8;
+            let res = check_overflow(v_h.overflowing_sub(h_k_r), "overflow on v_h - h_k_r")?
+                .rem_euclid(M);
 
             if res != 0 && result.is_none() {
                 // Returning early here would further damage our attempts to
@@ -460,28 +713,40 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
         let mut v = bytes;
 
         let t = v.first().ok_or_else(|| {
-            Error::ParseError("end of data while looking for ciphertext type marker".to_string())
+            Error::ParseError("end-of-data while looking for ciphertext type marker".to_string())
         })?;
-        v = &v[1..];
+        v = v.get(1..).ok_or_else(|| {
+            Error::ParseError(
+                "end-of-data while looking for rest of ciphertext after ciphertext type marker"
+                    .to_string(),
+            )
+        })?;
 
         let left: Option<LeftCipherText<'a, S, CMP, N, W, M>> = if *t == 0 {
             None
         } else if *t == 1 {
             let len_bytes = v.get(..2).ok_or_else(|| {
                 Error::ParseError(
-                    "end of data while looking for left ciphertext length".to_string(),
+                    "end-of-data while looking for left ciphertext length".to_string(),
                 )
             })?;
-            v = &v[2..];
-            let len = u16::from_be_bytes(len_bytes.try_into().map_err(|_| {
+            v = v.get(2..).ok_or_else(|| {
+                Error::ParseError(
+                    "end-of-data while looking for rest of ciphertext after left ciphertext length"
+                        .to_string(),
+                )
+            })?;
+            let len = u16::from_be_bytes(len_bytes.try_into().map_err(|e| {
                 Error::ParseError(format!(
-                    "failed to convert {len_bytes:?} into u16 for left ciphertext length"
+                    "failed to convert {len_bytes:?} into u16 for left ciphertext length ({e})"
                 ))
             })?) as usize;
             let left_bytes = v.get(..len).ok_or_else(|| {
-                Error::ParseError("end of data while looking for left ciphertext".to_string())
+                Error::ParseError("end-of-data while looking for left ciphertext".to_string())
             })?;
-            v = &v[len..];
+            v = v.get(len..).ok_or_else(|| {
+                Error::ParseError("end-of-data while looking for rest of ciphertext".to_string())
+            })?;
             Some(LeftCipherText::<'a, S, CMP, N, W, M>::from_slice(
                 left_bytes,
             )?)
@@ -490,18 +755,20 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
         };
 
         let len_bytes = v.get(..2).ok_or_else(|| {
-            Error::ParseError("end of data while looking for right ciphertext length".to_string())
+            Error::ParseError("end-of-data while looking for right ciphertext length".to_string())
         })?;
-        v = &v[2..];
-        let len = u16::from_be_bytes(len_bytes.try_into().map_err(|_| {
+        v = v.get(2..).ok_or_else(|| {
+            Error::ParseError("end-of-data while looking for right ciphertext".to_string())
+        })?;
+        let len = u16::from_be_bytes(len_bytes.try_into().map_err(|e| {
             Error::ParseError(format!(
-                "failed to convert {len_bytes:?} into u16 for right ciphertext length"
+                "failed to convert {len_bytes:?} into u16 for right ciphertext length ({e})"
             ))
         })?) as usize;
 
         if len == v.len() {
             let right_bytes = v.get(..len).ok_or_else(|| {
-                Error::ParseError("end of data while looking for right ciphertext".to_string())
+                Error::ParseError("end-of-data while looking for right ciphertext".to_string())
             })?;
             let right = RightCipherText::<'a, S, CMP, N, W, M>::from_slice(right_bytes)?;
 
@@ -514,31 +781,58 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
         }
     }
 
-    fn to_vec(&self) -> Vec<u8> {
+    fn to_vec(&self) -> Result<Vec<u8>, Error> {
         let f_size = <<S as CipherSuite<W, M>>::PRF as PseudoRandomFunction>::BLOCK_SIZE;
 
-        // 5 for type byte, left CT len, right CT len
-        // N * (f_size + 2) for left CT (if needed)
+        // Saturating arithmetic is fine here, because even if we end up with an underestimate of
+        // the vector's capacity, it can always expand it later
+        //
+        // 5 for type byte (u8), left CT len (maybe u16), right CT len (u16)
+        let meta_len: usize = 5;
+        // N * (f_size + 2) + 16 for left CT, just in case it's needed
+        let left_len: usize =
+            N.saturating_mul(f_size.saturating_add(2usize).saturating_add(16usize));
         // 16 + N * W / 4 for right CT
-        let mut v: Vec<u8> = Vec::with_capacity(5 + N * (f_size + 2) + 16 + N * W as usize / 4);
+        let right_len: usize =
+            16usize.saturating_add(N.saturating_mul(num::Integer::div_ceil(&W.into(), &4usize)));
+        let vec_len: usize = meta_len.saturating_add(left_len).saturating_add(right_len);
+        let mut v: Vec<u8> = Vec::with_capacity(vec_len);
 
         // Type byte -- 0 is just a right CT, 1 is left+right
         // other values to be worried about later
         match &self.left {
             Some(l) => {
                 v.push(1);
-                let left_bytes = l.to_vec();
-                v.extend_from_slice(&(left_bytes.len() as u16).to_be_bytes());
+                let left_bytes = l.to_vec()?;
+                v.extend_from_slice(
+                    &u16::try_from(left_bytes.len())
+                        .map_err(|e| {
+                            Error::RangeError(format!(
+                                "Couldn't represent length left_bytes ({}) as u16 ({e})",
+                                left_bytes.len()
+                            ))
+                        })?
+                        .to_be_bytes(),
+                );
                 v.extend_from_slice(&left_bytes);
             }
             None => v.push(0),
         };
 
-        let right_bytes = self.right.to_vec();
-        v.extend_from_slice(&(right_bytes.len() as u16).to_be_bytes());
+        let right_bytes = self.right.to_vec()?;
+        v.extend_from_slice(
+            &u16::try_from(right_bytes.len())
+                .map_err(|e| {
+                    Error::RangeError(format!(
+                        "Couldn't represent length of right_bytes ({}) as u16 ({e})",
+                        right_bytes.len()
+                    ))
+                })?
+                .to_be_bytes(),
+        );
         v.extend_from_slice(&right_bytes);
 
-        v
+        Ok(v)
     }
 }
 
@@ -567,9 +861,9 @@ mod tests {
         fn binary_full_ciphertext_roundtrips_correctly() {
             let cipher = ere::Cipher::<8, 256>::new(key()).unwrap();
 
-            let n = cipher.full_encrypt(31_337u64.into()).unwrap();
+            let n = cipher.full_encrypt(&31_337u64.try_into().unwrap()).unwrap();
 
-            let v = n.to_vec();
+            let v = n.to_vec().unwrap();
 
             let n_rt = ere::CipherText::<8, 256>::from_slice(&v).unwrap();
 
@@ -581,11 +875,11 @@ mod tests {
         fn binary_right_ciphertext_roundtrips_correctly() {
             let cipher = ere::Cipher::<8, 256>::new(key()).unwrap();
 
-            let n1 = cipher.full_encrypt(31_337u64.into()).unwrap();
-            let mut n2 = cipher.full_encrypt(31_337u64.into()).unwrap();
+            let n1 = cipher.full_encrypt(&31_337u64.try_into().unwrap()).unwrap();
+            let mut n2 = cipher.full_encrypt(&31_337u64.try_into().unwrap()).unwrap();
             n2.left = None;
 
-            let v = n2.to_vec();
+            let v = n2.to_vec().unwrap();
 
             let n_rt = ere::CipherText::<8, 256>::from_slice(&v).unwrap();
 
@@ -596,8 +890,8 @@ mod tests {
         fn cannot_deserialise_full_ciphertext_with_smaller_chunk_count() {
             let cipher = ere::Cipher::<4, 256>::new(key()).unwrap();
 
-            let n = cipher.full_encrypt(31_337u32.into()).unwrap();
-            let v = n.to_vec();
+            let n = cipher.full_encrypt(&31_337u32.try_into().unwrap()).unwrap();
+            let v = n.to_vec().unwrap();
 
             assert!(ere::CipherText::<8, 256>::from_slice(&v).is_err());
         }
@@ -606,8 +900,8 @@ mod tests {
         fn cannot_deserialise_full_ciphertext_with_larger_chunk_count() {
             let cipher = ere::Cipher::<8, 256>::new(key()).unwrap();
 
-            let n = cipher.full_encrypt(31_337u32.into()).unwrap();
-            let v = n.to_vec();
+            let n = cipher.full_encrypt(&31_337u32.try_into().unwrap()).unwrap();
+            let v = n.to_vec().unwrap();
 
             assert!(ere::CipherText::<4, 256>::from_slice(&v).is_err());
         }
@@ -616,8 +910,8 @@ mod tests {
         fn cannot_deserialise_full_ciphertext_with_smaller_chunk_width() {
             let cipher = ere::Cipher::<4, 16>::new(key()).unwrap();
 
-            let n = cipher.full_encrypt(42u16.into()).unwrap();
-            let v = n.to_vec();
+            let n = cipher.full_encrypt(&42u16.try_into().unwrap()).unwrap();
+            let v = n.to_vec().unwrap();
 
             assert!(ere::CipherText::<4, 256>::from_slice(&v).is_err());
         }
@@ -626,8 +920,8 @@ mod tests {
         fn cannot_deserialise_full_ciphertext_with_larger_chunk_width() {
             let cipher = ere::Cipher::<4, 256>::new(key()).unwrap();
 
-            let n = cipher.full_encrypt(42u16.into()).unwrap();
-            let v = n.to_vec();
+            let n = cipher.full_encrypt(&42u16.try_into().unwrap()).unwrap();
+            let v = n.to_vec().unwrap();
 
             assert!(ere::CipherText::<4, 16>::from_slice(&v).is_err());
         }
@@ -636,8 +930,10 @@ mod tests {
         fn cannot_deserialise_right_ciphertext_with_smaller_chunk_count() {
             let cipher = ere::Cipher::<4, 256>::new(key()).unwrap();
 
-            let n = cipher.right_encrypt(31_337u32.into()).unwrap();
-            let v = n.to_vec();
+            let n = cipher
+                .right_encrypt(&31_337u32.try_into().unwrap())
+                .unwrap();
+            let v = n.to_vec().unwrap();
 
             assert!(ere::CipherText::<8, 256>::from_slice(&v).is_err());
         }
@@ -646,8 +942,10 @@ mod tests {
         fn cannot_deserialise_right_ciphertext_with_larger_chunk_count() {
             let cipher = ere::Cipher::<8, 256>::new(key()).unwrap();
 
-            let n = cipher.right_encrypt(31_337u32.into()).unwrap();
-            let v = n.to_vec();
+            let n = cipher
+                .right_encrypt(&31_337u32.try_into().unwrap())
+                .unwrap();
+            let v = n.to_vec().unwrap();
 
             assert!(ere::CipherText::<4, 256>::from_slice(&v).is_err());
         }
@@ -656,8 +954,8 @@ mod tests {
         fn cannot_deserialise_right_ciphertext_with_smaller_chunk_width() {
             let cipher = ere::Cipher::<4, 16>::new(key()).unwrap();
 
-            let n = cipher.right_encrypt(42u16.into()).unwrap();
-            let v = n.to_vec();
+            let n = cipher.right_encrypt(&42u16.try_into().unwrap()).unwrap();
+            let v = n.to_vec().unwrap();
 
             assert!(ere::CipherText::<4, 256>::from_slice(&v).is_err());
         }
@@ -666,8 +964,8 @@ mod tests {
         fn cannot_deserialise_right_ciphertext_with_larger_chunk_width() {
             let cipher = ere::Cipher::<4, 256>::new(key()).unwrap();
 
-            let n = cipher.right_encrypt(42u16.into()).unwrap();
-            let v = n.to_vec();
+            let n = cipher.right_encrypt(&42u16.try_into().unwrap()).unwrap();
+            let v = n.to_vec().unwrap();
 
             assert!(ere::CipherText::<4, 16>::from_slice(&v).is_err());
         }
@@ -681,11 +979,11 @@ mod tests {
         fn trinary_full_ciphertext_roundtrips_correctly() {
             let cipher = ore::Cipher::<8, 256>::new(key()).unwrap();
 
-            let n1 = cipher.full_encrypt(42u64.into()).unwrap();
-            let n2 = cipher.full_encrypt(31_337u64.into()).unwrap();
+            let n1 = cipher.full_encrypt(&42u64.try_into().unwrap()).unwrap();
+            let n2 = cipher.full_encrypt(&31_337u64.try_into().unwrap()).unwrap();
 
-            let v1 = n1.to_vec();
-            let v2 = n2.to_vec();
+            let v1 = n1.to_vec().unwrap();
+            let v2 = n2.to_vec().unwrap();
 
             let n1_rt = ore::CipherText::<8, 256>::from_slice(&v1).unwrap();
             let n2_rt = ore::CipherText::<8, 256>::from_slice(&v2).unwrap();
@@ -705,19 +1003,19 @@ mod tests {
         fn trinary_right_ciphertext_roundtrips_correctly() {
             let cipher = ore::Cipher::<8, 256>::new(key()).unwrap();
 
-            let n1f = cipher.full_encrypt(42u64.into()).unwrap();
-            let mut n1r = cipher.full_encrypt(42u64.into()).unwrap();
+            let n1f = cipher.full_encrypt(&42u64.try_into().unwrap()).unwrap();
+            let mut n1r = cipher.full_encrypt(&42u64.try_into().unwrap()).unwrap();
             n1r.left = None;
 
-            let v1r = n1r.to_vec();
+            let v1r = n1r.to_vec().unwrap();
 
             let n1r_rt = ore::CipherText::<8, 256>::from_slice(&v1r).unwrap();
 
-            let n2f = cipher.full_encrypt(31_337u64.into()).unwrap();
-            let mut n2r = cipher.full_encrypt(31_337u64.into()).unwrap();
+            let n2f = cipher.full_encrypt(&31_337u64.try_into().unwrap()).unwrap();
+            let mut n2r = cipher.full_encrypt(&31_337u64.try_into().unwrap()).unwrap();
             n2r.left = None;
 
-            let v2r = n2r.to_vec();
+            let v2r = n2r.to_vec().unwrap();
 
             let n2r_rt = ore::CipherText::<8, 256>::from_slice(&v2r).unwrap();
 
@@ -731,8 +1029,8 @@ mod tests {
         fn cannot_deserialise_full_ciphertext_with_smaller_chunk_count() {
             let cipher = ore::Cipher::<4, 256>::new(key()).unwrap();
 
-            let n = cipher.full_encrypt(31_337u32.into()).unwrap();
-            let v = n.to_vec();
+            let n = cipher.full_encrypt(&31_337u32.try_into().unwrap()).unwrap();
+            let v = n.to_vec().unwrap();
 
             assert!(ore::CipherText::<8, 256>::from_slice(&v).is_err());
         }
@@ -741,8 +1039,8 @@ mod tests {
         fn cannot_deserialise_full_ciphertext_with_larger_chunk_count() {
             let cipher = ore::Cipher::<8, 256>::new(key()).unwrap();
 
-            let n = cipher.full_encrypt(31_337u32.into()).unwrap();
-            let v = n.to_vec();
+            let n = cipher.full_encrypt(&31_337u32.try_into().unwrap()).unwrap();
+            let v = n.to_vec().unwrap();
 
             assert!(ore::CipherText::<4, 256>::from_slice(&v).is_err());
         }
@@ -751,8 +1049,8 @@ mod tests {
         fn cannot_deserialise_full_ciphertext_with_smaller_chunk_width() {
             let cipher = ore::Cipher::<4, 16>::new(key()).unwrap();
 
-            let n = cipher.full_encrypt(42u16.into()).unwrap();
-            let v = n.to_vec();
+            let n = cipher.full_encrypt(&42u16.try_into().unwrap()).unwrap();
+            let v = n.to_vec().unwrap();
 
             assert!(ore::CipherText::<4, 256>::from_slice(&v).is_err());
         }
@@ -761,8 +1059,8 @@ mod tests {
         fn cannot_deserialise_full_ciphertext_with_larger_chunk_width() {
             let cipher = ore::Cipher::<4, 256>::new(key()).unwrap();
 
-            let n = cipher.full_encrypt(42u16.into()).unwrap();
-            let v = n.to_vec();
+            let n = cipher.full_encrypt(&42u16.try_into().unwrap()).unwrap();
+            let v = n.to_vec().unwrap();
 
             assert!(ore::CipherText::<4, 16>::from_slice(&v).is_err());
         }
@@ -771,8 +1069,10 @@ mod tests {
         fn cannot_deserialise_right_ciphertext_with_smaller_chunk_count() {
             let cipher = ore::Cipher::<4, 256>::new(key()).unwrap();
 
-            let n = cipher.right_encrypt(31_337u32.into()).unwrap();
-            let v = n.to_vec();
+            let n = cipher
+                .right_encrypt(&31_337u32.try_into().unwrap())
+                .unwrap();
+            let v = n.to_vec().unwrap();
 
             assert!(ore::CipherText::<8, 256>::from_slice(&v).is_err());
         }
@@ -781,8 +1081,10 @@ mod tests {
         fn cannot_deserialise_right_ciphertext_with_larger_chunk_count() {
             let cipher = ore::Cipher::<8, 256>::new(key()).unwrap();
 
-            let n = cipher.right_encrypt(31_337u32.into()).unwrap();
-            let v = n.to_vec();
+            let n = cipher
+                .right_encrypt(&31_337u32.try_into().unwrap())
+                .unwrap();
+            let v = n.to_vec().unwrap();
 
             assert!(ore::CipherText::<4, 256>::from_slice(&v).is_err());
         }
@@ -791,8 +1093,8 @@ mod tests {
         fn cannot_deserialise_right_ciphertext_with_smaller_chunk_width() {
             let cipher = ore::Cipher::<4, 16>::new(key()).unwrap();
 
-            let n = cipher.right_encrypt(42u16.into()).unwrap();
-            let v = n.to_vec();
+            let n = cipher.right_encrypt(&42u16.try_into().unwrap()).unwrap();
+            let v = n.to_vec().unwrap();
 
             assert!(ore::CipherText::<4, 256>::from_slice(&v).is_err());
         }
@@ -801,8 +1103,8 @@ mod tests {
         fn cannot_deserialise_right_ciphertext_with_larger_chunk_width() {
             let cipher = ore::Cipher::<4, 256>::new(key()).unwrap();
 
-            let n = cipher.right_encrypt(42u16.into()).unwrap();
-            let v = n.to_vec();
+            let n = cipher.right_encrypt(&42u16.try_into().unwrap()).unwrap();
+            let v = n.to_vec().unwrap();
 
             assert!(ore::CipherText::<4, 16>::from_slice(&v).is_err());
         }
