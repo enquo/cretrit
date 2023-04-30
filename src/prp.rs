@@ -4,8 +4,7 @@
 //! value in the same range.  This is the module that contains everything you need to do that.
 //!
 
-use rand::distributions::Uniform;
-use rand::{Rng, SeedableRng};
+use rand::{seq::SliceRandom, SeedableRng};
 use rand_chacha::ChaCha20Rng;
 use std::fmt;
 use zeroize::ZeroizeOnDrop;
@@ -32,35 +31,29 @@ pub trait PseudoRandomPermutation<const W: u16>: Sized {
     fn inverse(&self, data: u16) -> Result<u16, Error>;
 }
 
-/// A pseudo-random permutation based on the "Knuth" shuffle (aka Fisher-Yates Shuffle, but that's
-/// more of a mouthful)
+/// A pseudo-random permutation using rand::shuffle
 #[allow(unreachable_pub)] // I think this is a bug in the lint; see also https://github.com/rust-lang/rust/issues/110923
 #[derive(ZeroizeOnDrop)]
 #[doc(hidden)]
-pub struct KnuthShufflePRP<const W: u16> {
+pub struct RandShufflePRP<const W: u16> {
     /// The "forward" direction lookup of value -> permutation
     p: Vec<u16>,
     /// The "inverse" direction lookup, of permutation -> value
     p_1: Vec<u16>,
 }
 
-impl<const W: u16> PseudoRandomPermutationInit<W> for KnuthShufflePRP<W> {
+impl<const W: u16> PseudoRandomPermutationInit<W> for RandShufflePRP<W> {
     fn new(kdf: &KBKDF) -> Result<Self, Error> {
         let mut seed: [u8; 32] = Default::default();
-        kdf.derive_key(&mut seed, b"KnuthShufflePRP.rngseed")?;
-        let rng: ChaCha20Rng = SeedableRng::from_seed(seed);
+        kdf.derive_key(&mut seed, b"RandShufflePRP.rngseed")?;
+        let mut rng: ChaCha20Rng = SeedableRng::from_seed(seed);
 
         let mut p: Vec<u16> = (0..W).collect();
         let mut p_1 = vec![0u16; W as usize];
 
-        let sample_range = Uniform::from(0..W);
-        for (idx, val) in rng.sample_iter(sample_range).take(W as usize).enumerate() {
-            p.swap(idx, val as usize);
-        }
+        p.shuffle(&mut rng);
 
-        // In theory, it should be possible to construct p_1 in the main loop
-        // above, but I'll be jiggered if I can figure out how, so we do an
-        // extra loop
+        // Saves doing an O(n) traversal of p for every inverse lookup
         for (idx, val) in p.iter().enumerate() {
             let v = p_1.get_mut(*val as usize).ok_or_else(|| {
                 Error::InternalError(format!(
@@ -70,18 +63,18 @@ impl<const W: u16> PseudoRandomPermutationInit<W> for KnuthShufflePRP<W> {
             *v = u16::try_from(idx).map_err(|e| Error::RangeError(e.to_string()))?;
         }
 
-        Ok(KnuthShufflePRP { p, p_1 })
+        Ok(RandShufflePRP { p, p_1 })
     }
 }
 
-impl<const W: u16> fmt::Debug for KnuthShufflePRP<W> {
+impl<const W: u16> fmt::Debug for RandShufflePRP<W> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct(&format!("KnuthShufflePRP<W: {W}>"))
+        f.debug_struct(&format!("RandShufflePRP<W: {W}>"))
             .finish_non_exhaustive()
     }
 }
 
-impl<const W: u16> PseudoRandomPermutation<W> for KnuthShufflePRP<W> {
+impl<const W: u16> PseudoRandomPermutation<W> for RandShufflePRP<W> {
     fn value(&self, data: u16) -> Result<u16, Error> {
         self.p
             .get(data as usize)
@@ -117,14 +110,14 @@ mod tests {
 
     #[test]
     fn small_shuffle_isnt_a_sequential_list() {
-        let prp = KnuthShufflePRP::<16>::new(&kdf()).unwrap();
+        let prp = RandShufflePRP::<16>::new(&kdf()).unwrap();
 
         assert!(!(0..16).all(|i| prp.value(i).unwrap() == i));
     }
 
     #[test]
     fn small_shuffle_round_trips_correctly() {
-        let prp = KnuthShufflePRP::<16>::new(&kdf()).unwrap();
+        let prp = RandShufflePRP::<16>::new(&kdf()).unwrap();
 
         for i in 0..16 {
             assert_eq!(i, prp.inverse(prp.value(i).unwrap()).unwrap());
