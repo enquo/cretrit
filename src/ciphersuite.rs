@@ -1,7 +1,7 @@
 //! The home of the `CipherSuite` trait.
 //!
 
-use rand::{Rng, SeedableRng};
+use rand::{CryptoRng, Rng, SeedableRng};
 
 use crate::hash::HashFunction;
 use crate::prf::PseudoRandomFunction;
@@ -20,7 +20,7 @@ pub trait CipherSuite<const W: u16, const M: u8> {
     /// A quality RNG is required both for generating random values (like nonces), but also as a
     /// source of *deterministic* randomness, by being seeded by a key of some kind.
     ///
-    type RNG: Rng + SeedableRng;
+    type RNG: Rng + SeedableRng + CryptoRng;
 
     /// The pseudo-random function
     ///
