@@ -1,3 +1,6 @@
+#![allow(unused_crate_dependencies)]
+#![allow(missing_docs)]
+
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use hex_literal::hex;
 
@@ -13,11 +16,11 @@ fn create_ore_cipher() -> ore::Cipher<8, 256> {
 
 #[inline]
 fn encrypt_u64<'a>(c: &'a ore::Cipher<8, 256>, u: u64) -> ore::CipherText<'a, 8, 256> {
-    c.full_encrypt(u.into()).unwrap()
+    c.full_encrypt(&u.try_into().unwrap()).unwrap()
 }
 
 fn serialise_ciphertext(ct: &ore::CipherText<'_, 8, 256>) -> Vec<u8> {
-    ct.to_vec()
+    ct.to_vec().unwrap()
 }
 
 fn deserialise_ciphertext(v: &[u8]) -> ore::CipherText<'_, 8, 256> {
