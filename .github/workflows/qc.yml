@@ -1,7 +1,6 @@
 name: "Pre-merge Quality-Control"
 on:
   push:
-    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
