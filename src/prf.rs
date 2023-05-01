@@ -24,7 +24,7 @@ pub trait PseudoRandomFunctionInit: Sized + PseudoRandomFunction {
     ///
     /// The key, derived from the KBKDF, allows us to have PRFs that are deterministic (as long as
     /// the same key is given) while being totally different for a different key.
-    fn new(key: &KBKDF) -> Result<Self, Error>;
+    fn new(key: &dyn KBKDF) -> Result<Self, Error>;
 }
 
 /// Operation of a PRF
@@ -56,7 +56,7 @@ pub struct AES128PRF {
 }
 
 impl PseudoRandomFunctionInit for AES128PRF {
-    fn new(kdf: &KBKDF) -> Result<Self, Error> {
+    fn new(kdf: &dyn KBKDF) -> Result<Self, Error> {
         let mut k: [u8; 16] = Default::default();
 
         kdf.derive_key(&mut k, b"AES128PRF.subkey")?;

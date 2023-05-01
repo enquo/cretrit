@@ -4,6 +4,7 @@
 use rand::{CryptoRng, Rng, SeedableRng};
 
 use crate::hash::HashFunction;
+use crate::kbkdf::{KBKDFInit, KBKDF};
 use crate::prf::PseudoRandomFunction;
 use crate::prp::PseudoRandomPermutation;
 
@@ -50,4 +51,12 @@ pub trait CipherSuite<const W: u16, const M: u8> {
     /// will be "scrambled" differently.
     ///
     type PRP: PseudoRandomPermutation<W>;
+
+    /// The key-based key derivation function
+    ///
+    /// How we generate subkeys from a "root" key for the various cryptographic operations is an
+    /// important property of the ciphersuite -- a differently-behaving KBKDF will produce
+    /// completely different ciphertexts.
+    ///
+    type KBKDF: KBKDF + KBKDFInit;
 }

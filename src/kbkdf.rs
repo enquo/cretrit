@@ -1,8 +1,8 @@
 //! Key-based Key Derivation
 //!
-//! This is a process for deriving an arbitrary amount of additional key material from a single key
-//! (of suitable strength) using a pseudorandom function (aka "a hash function").  See SP800-108
-//! for the gory details of how to Do It Right.
+//! With a hash function, and some guidance from NIST SP800-108, one can derive new keys from an
+//! existing key, as many as one might like.  Very handy stuff when you need a lot of keys, and
+//! would rather not spend a fortune on KMS.
 //!
 
 use aes::Aes128;
@@ -12,30 +12,74 @@ use zeroize::ZeroizeOnDrop;
 
 use crate::{util::check_overflow, Error};
 
-/// Key-Based Key Derivation Function
+/// Initialisation of a KBKDF
 ///
-/// With a hash function, and some guidance from NIST SP800-108, one can derive new keys from an
-/// existing key, as many as one might like.  Very handy stuff when you need a lot of keys, and
-/// would rather not spend a fortune on KMS.
+#[allow(clippy::upper_case_acronyms)]
+#[doc(hidden)]
+pub trait KBKDFInit: KBKDF {
+    /// Create a KBKDF instance
+    ///
+    /// # Errors
+    ///
+    /// Different KBKDFs have different requirements for the size of their key, which will be the
+    /// most likely cause of errors.
+    ///
+    fn new(root_key: &[u8]) -> Result<Box<Self>, Error>;
+}
+
+/// The key-generating functionality of a KBKDF
+///
+#[allow(clippy::upper_case_acronyms)]
+pub trait KBKDF {
+    /// Generate a new key
+    ///
+    /// The derived key is written to `subkey`, which can be of arbitrary length.
+    /// If the same `id` is passed to a KBKDF created with the same `root_key`, the same subkey will be generated each time.
+    /// Thus, make your `id`s distinct for each different use of the same KBKDF.
+    ///
+    /// # Errors
+    ///
+    /// Will fail if an underlying cryptographic operation fails.
+    ///
+    fn derive_key(&self, subkey: &mut [u8], id: &[u8]) -> Result<(), Error>;
+}
+
+/// A KBKDF based on CMACAES128
+///
+/// NIST SP800-108 has caveats around using CMAC, however those caveats don't apply to our use, and
+/// AES-128 is typically hardware accelerated, giving a performance boost over a construction using
+/// HMAC SHA-256, for example.
 ///
 #[derive(ZeroizeOnDrop)]
 #[allow(clippy::upper_case_acronyms)]
-pub struct KBKDF {
+pub struct CMACAES128 {
     /// The key from which all our new keys are derived
-    key: [u8; 16],
+    root_key: [u8; 16],
 }
 
 /// The number of bytes that the underlying cryptographic primitive generates on each call
 const KBKDF_BLOCK_SIZE: usize = 16;
 
-impl KBKDF {
-    /// Initialise a KBKDF with a key
-    pub fn new(key: [u8; 16]) -> Self {
-        KBKDF { key }
-    }
+impl KBKDFInit for CMACAES128 {
+    fn new(root_key: &[u8]) -> Result<Box<Self>, Error> {
+        if root_key.len() != 16 {
+            return Err(Error::KeyError(format!(
+                "key for a CMACAES128 KBKDF must be exactly 16 bytes (got {})",
+                root_key.len()
+            )));
+        }
 
-    /// Generate a new key of arbitrary length from the KBKDF's own key
-    pub fn derive_key(&self, subkey: &mut [u8], id: &[u8]) -> Result<(), Error> {
+        let mut kbkdf = Self {
+            root_key: Default::default(),
+        };
+        kbkdf.root_key.copy_from_slice(root_key);
+
+        Ok(Box::new(kbkdf))
+    }
+}
+
+impl KBKDF for CMACAES128 {
+    fn derive_key(&self, subkey: &mut [u8], id: &[u8]) -> Result<(), Error> {
         let subkey_len = subkey.len();
         let count: u16 = num::Integer::div_ceil(&subkey_len, &KBKDF_BLOCK_SIZE)
             .try_into()
@@ -44,7 +88,7 @@ impl KBKDF {
                     "Attempted to derive key greater than maximum supported size ({e})"
                 ))
             })?;
-        let mut keygen = Cmac::<Aes128>::new_from_slice(&self.key).map_err(|e| {
+        let mut keygen = Cmac::<Aes128>::new_from_slice(&self.root_key).map_err(|e| {
             Error::KeyError(format!(
                 "CAN'T HAPPEN: KBKDF key is of invalid length ({e})"
             ))
@@ -79,7 +123,7 @@ impl KBKDF {
     }
 }
 
-impl fmt::Debug for KBKDF {
+impl fmt::Debug for CMACAES128 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("KBKDF")
             .field("key", &"**REDACTED**")
@@ -92,68 +136,80 @@ mod tests {
     use super::*;
     use hex_literal::hex;
 
-    #[test]
-    fn derive_short_subkey() {
-        let key = hex!["d742ccd1 686b7bce af5d4183 06efe6d6"];
-        let mut subkey = [0u8; 4];
+    mod cmacaes128 {
+        use super::*;
 
-        KBKDF::new(key).derive_key(&mut subkey, b"testing").unwrap();
+        #[test]
+        fn derive_short_subkey() {
+            let key = hex!["d742ccd1 686b7bce af5d4183 06efe6d6"];
+            let mut subkey = [0u8; 4];
 
-        assert_eq!(hex!["152879b9"], subkey);
-    }
+            CMACAES128::new(&key)
+                .unwrap()
+                .derive_key(&mut subkey, b"testing")
+                .unwrap();
 
-    #[test]
-    fn derive_one_block_subkey() {
-        let key = hex!["d742ccd1 686b7bce af5d4183 06efe6d6"];
-        let mut subkey = [0u8; 16];
+            assert_eq!(hex!["152879b9"], subkey);
+        }
 
-        KBKDF::new(key)
-            .derive_key(&mut subkey, b"blocktest")
-            .unwrap();
+        #[test]
+        fn derive_one_block_subkey() {
+            let key = hex!["d742ccd1 686b7bce af5d4183 06efe6d6"];
+            let mut subkey = [0u8; 16];
 
-        assert_eq!(hex!["2cd97a3a 50e559d7 f5cceccc 6b008ce7"], subkey);
-    }
+            CMACAES128::new(&key)
+                .unwrap()
+                .derive_key(&mut subkey, b"blocktest")
+                .unwrap();
 
-    #[test]
-    fn derive_multiblock_subkey() {
-        let key = hex!["d742ccd1 686b7bce af5d4183 06efe6d6"];
-        let mut subkey = [0u8; 128];
+            assert_eq!(hex!["2cd97a3a 50e559d7 f5cceccc 6b008ce7"], subkey);
+        }
 
-        KBKDF::new(key)
-            .derive_key(&mut subkey, b"yugeblocktest")
-            .unwrap();
+        #[test]
+        fn derive_multiblock_subkey() {
+            let key = hex!["d742ccd1 686b7bce af5d4183 06efe6d6"];
+            let mut subkey = [0u8; 128];
 
-        assert_eq!(
-            hex![
-                "f3b2707c 81d7915d 6a24ade4 5d09dc25
-                  10e1f77d a720a63e bc0f58b7 05c329ed
-                  b4d00b54 83f553e5 8d35fb52 0d97d2dd
-                  2ae16e9f dcb88664 27d4d3bd d78c1be0
-                  18dfebb8 58698cf9 492caa4c 6a0d7552
-                  9ba4bb06 d003eaf0 12f97eb2 e8c21e4a
-                  389b00e9 d3dae4ad d1546eed 679d5b16
-                  6744c064 5ca26639 9ef24733 7f0de875
-            "
-            ],
-            subkey
-        );
-    }
+            CMACAES128::new(&key)
+                .unwrap()
+                .derive_key(&mut subkey, b"yugeblocktest")
+                .unwrap();
 
-    #[test]
-    fn derive_odd_sized_subkey() {
-        let key = hex!["d742ccd1 686b7bce af5d4183 06efe6d6"];
-        let mut subkey = [0u8; 39];
+            assert_eq!(
+                hex![
+                    "f3b2707c 81d7915d 6a24ade4 5d09dc25
+                      10e1f77d a720a63e bc0f58b7 05c329ed
+                      b4d00b54 83f553e5 8d35fb52 0d97d2dd
+                      2ae16e9f dcb88664 27d4d3bd d78c1be0
+                      18dfebb8 58698cf9 492caa4c 6a0d7552
+                      9ba4bb06 d003eaf0 12f97eb2 e8c21e4a
+                      389b00e9 d3dae4ad d1546eed 679d5b16
+                      6744c064 5ca26639 9ef24733 7f0de875
+                "
+                ],
+                subkey
+            );
+        }
 
-        KBKDF::new(key).derive_key(&mut subkey, b"oddbod").unwrap();
+        #[test]
+        fn derive_odd_sized_subkey() {
+            let key = hex!["d742ccd1 686b7bce af5d4183 06efe6d6"];
+            let mut subkey = [0u8; 39];
 
-        assert_eq!(
-            hex![
-                "6219883e c4a3d6c4 8463f593 8002b2a9
-                  8b63f33a 1023193a 38961489 1fa40380
-                  6c24ff49 374d68
-            "
-            ],
-            subkey
-        );
+            CMACAES128::new(&key)
+                .unwrap()
+                .derive_key(&mut subkey, b"oddbod")
+                .unwrap();
+
+            assert_eq!(
+                hex![
+                    "6219883e c4a3d6c4 8463f593 8002b2a9
+                      8b63f33a 1023193a 38961489 1fa40380
+                      6c24ff49 374d68
+                "
+                ],
+                subkey
+            );
+        }
     }
 }

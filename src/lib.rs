@@ -15,6 +15,12 @@ pub use {
     error::Error, plaintext::PlainText,
 };
 
+#[doc(hidden)]
+// For some reason, every *other* trait gets exported automatically, but this trait isn't.
+// But it's really an implementation detail, and shouldn't be part of the public API, so let's at
+// least hide it from the crate docs.
+pub use kbkdf::KBKDFInit;
+
 pub mod aes128v1;
 
 mod bitlist;

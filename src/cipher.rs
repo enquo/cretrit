@@ -9,7 +9,7 @@ use std::marker::PhantomData;
 use crate::ciphersuite::CipherSuite;
 use crate::ciphertext::CipherText;
 use crate::cmp::Comparator;
-use crate::kbkdf::KBKDF;
+use crate::kbkdf::{KBKDFInit, KBKDF};
 use crate::plaintext::PlainText;
 use crate::prf::{PseudoRandomFunction, PseudoRandomFunctionInit};
 use crate::prp::{PseudoRandomPermutation, PseudoRandomPermutationInit};
@@ -85,12 +85,14 @@ impl<S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16, con
     where
         <S as CipherSuite<W, M>>::PRF: PseudoRandomFunctionInit,
         <S as CipherSuite<W, M>>::PRP: PseudoRandomPermutationInit<W>,
+        <S as CipherSuite<W, M>>::KBKDF: 'static,
     {
         #![allow(clippy::similar_names)] // I think we can keep things clear in here, prf/prp is totes different
-        let kbkdf = KBKDF::new(key);
+        let kbkdf: Box<dyn KBKDF> = S::KBKDF::new(&key)
+            .map_err(|e| Error::KeyError(format!("failed to create KBKDF instance: {e}")))?;
 
-        let prf: S::PRF = PseudoRandomFunctionInit::new(&kbkdf)?;
-        let prp: S::PRP = PseudoRandomPermutationInit::new(&kbkdf)?;
+        let prf: S::PRF = PseudoRandomFunctionInit::new(&*kbkdf)?;
+        let prp: S::PRP = PseudoRandomPermutationInit::new(&*kbkdf)?;
         let rng: S::RNG = SeedableRng::from_entropy();
 
         Ok(Cipher {

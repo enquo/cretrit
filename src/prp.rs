@@ -20,7 +20,7 @@ pub trait PseudoRandomPermutationInit<const W: u16>: Sized + PseudoRandomPermuta
     /// The PRP is initialised with a subkey from the KBKDF, so that PRPs
     /// for different purposes end up with different permutations, while still
     /// being deterministic whenever they're given the same key.
-    fn new(key: &KBKDF) -> Result<Self, Error>;
+    fn new(key: &dyn KBKDF) -> Result<Self, Error>;
 }
 
 /// Functionality for a PRP
@@ -43,7 +43,7 @@ pub struct RandShufflePRP<const W: u16> {
 }
 
 impl<const W: u16> PseudoRandomPermutationInit<W> for RandShufflePRP<W> {
-    fn new(kdf: &KBKDF) -> Result<Self, Error> {
+    fn new(kdf: &dyn KBKDF) -> Result<Self, Error> {
         let mut seed: [u8; 32] = Default::default();
         kdf.derive_key(&mut seed, b"RandShufflePRP.rngseed")?;
         let mut rng: ChaCha20Rng = SeedableRng::from_seed(seed);
@@ -103,21 +103,22 @@ impl<const W: u16> PseudoRandomPermutation<W> for RandShufflePRP<W> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::kbkdf::{KBKDFInit, CMACAES128};
 
-    fn kdf() -> KBKDF {
-        KBKDF::new([0u8; 16])
+    fn kdf() -> Box<dyn KBKDF> {
+        CMACAES128::new(&[0u8; 16]).unwrap()
     }
 
     #[test]
     fn small_shuffle_isnt_a_sequential_list() {
-        let prp = RandShufflePRP::<16>::new(&kdf()).unwrap();
+        let prp = RandShufflePRP::<16>::new(&*kdf()).unwrap();
 
         assert!(!(0..16).all(|i| prp.value(i).unwrap() == i));
     }
 
     #[test]
     fn small_shuffle_round_trips_correctly() {
-        let prp = RandShufflePRP::<16>::new(&kdf()).unwrap();
+        let prp = RandShufflePRP::<16>::new(&*kdf()).unwrap();
 
         for i in 0..16 {
             assert_eq!(i, prp.inverse(prp.value(i).unwrap()).unwrap());

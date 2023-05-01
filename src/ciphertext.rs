@@ -8,7 +8,7 @@ use crate::ciphersuite::CipherSuite;
 use crate::cmp::Comparator;
 use crate::error::Error;
 use crate::hash::HashFunction;
-use crate::kbkdf::KBKDF;
+use crate::kbkdf::{KBKDFInit, KBKDF};
 use crate::plaintext::PlainText;
 use crate::prf::PseudoRandomFunction;
 use crate::util::check_overflow;
@@ -312,7 +312,7 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
     /// Generate the per-block nonces and cache them so we don't have to generate them every time
     /// we want to read them
     fn cache_nonces(rct: &mut RightCipherText<'a, S, CMP, N, W, M>) -> Result<(), Error> {
-        let ndf = KBKDF::new(rct.nonce_base);
+        let ndf = S::KBKDF::new(&rct.nonce_base)?;
 
         for i in 0..N {
             let mut k = Vec::<u8>::with_capacity(11);
