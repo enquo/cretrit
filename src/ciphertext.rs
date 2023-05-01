@@ -674,6 +674,12 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
         }
     }
 
+    /// Determine whether this ciphertext has a "left" ciphertext
+    ///
+    pub fn has_left(&self) -> bool {
+        self.left.is_some()
+    }
+
     /// Compare two ciphertexts
     ///
     /// Returns the numeric comparison value, which needs to be run through the comparator's invert
@@ -856,6 +862,26 @@ mod tests {
     mod ere {
         use super::*;
         use crate::aes128v1::ere;
+
+        #[test]
+        fn full_ciphertext_has_left() {
+            let cipher = ere::Cipher::<8, 256>::new(key()).unwrap();
+
+            let n = cipher.full_encrypt(&31_337u64.try_into().unwrap()).unwrap();
+
+            assert!(n.has_left());
+        }
+
+        #[test]
+        fn right_ciphertext_does_not_have_left() {
+            let cipher = ere::Cipher::<8, 256>::new(key()).unwrap();
+
+            let n = cipher
+                .right_encrypt(&31_337u64.try_into().unwrap())
+                .unwrap();
+
+            assert!(!n.has_left());
+        }
 
         #[test]
         fn binary_full_ciphertext_roundtrips_correctly() {
