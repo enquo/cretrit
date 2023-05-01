@@ -30,6 +30,9 @@ mod kbkdf;
 mod prf;
 mod prp;
 
+#[cfg(feature = "serde")]
+mod serde;
+
 #[cfg(test)]
 #[macro_use]
 extern crate quickcheck;
@@ -37,3 +40,5 @@ extern crate quickcheck;
 // Tells unused_crate_dependencies to STFU about the "unused dev dependency"
 #[cfg(test)]
 use criterion as _;
+#[cfg(test)]
+use serde_json as _;

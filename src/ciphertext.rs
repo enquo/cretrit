@@ -863,6 +863,9 @@ mod tests {
         use super::*;
         use crate::aes128v1::ere;
 
+        #[cfg(feature = "serde")]
+        use serde_json;
+
         #[test]
         fn full_ciphertext_has_left() {
             let cipher = ere::Cipher::<8, 256>::new(key()).unwrap();
@@ -902,14 +905,48 @@ mod tests {
             let cipher = ere::Cipher::<8, 256>::new(key()).unwrap();
 
             let n1 = cipher.full_encrypt(&31_337u64.try_into().unwrap()).unwrap();
-            let mut n2 = cipher.full_encrypt(&31_337u64.try_into().unwrap()).unwrap();
-            n2.left = None;
+            let n2 = cipher
+                .right_encrypt(&31_337u64.try_into().unwrap())
+                .unwrap();
 
             let v = n2.to_vec().unwrap();
 
-            let n_rt = ere::CipherText::<8, 256>::from_slice(&v).unwrap();
+            let n2_rt = ere::CipherText::<8, 256>::from_slice(&v).unwrap();
 
-            assert_eq!(n1, n_rt);
+            assert_eq!(n1, n2_rt);
+        }
+
+        #[test]
+        #[cfg(feature = "serde")]
+        fn serde_full_ciphertext_roundtrips_correctly() {
+            let cipher = ere::Cipher::<8, 256>::new(key()).unwrap();
+
+            let n = cipher.full_encrypt(&31_337u64.try_into().unwrap()).unwrap();
+
+            let s = serde_json::to_string(&n).unwrap();
+
+            let n_rt: ere::CipherText<'_, 8, 256> = serde_json::from_str(&s).unwrap();
+
+            assert_eq!(n, n_rt);
+            assert_eq!(n_rt, n);
+        }
+
+        #[test]
+        #[cfg(feature = "serde")]
+        fn serde_right_ciphertext_roundtrips_correctly() {
+            let cipher = ere::Cipher::<8, 256>::new(key()).unwrap();
+
+            let n1 = cipher.full_encrypt(&31_337u64.try_into().unwrap()).unwrap();
+            let n2 = cipher
+                .right_encrypt(&31_337u64.try_into().unwrap())
+                .unwrap();
+
+            let s = serde_json::to_string(&n2).unwrap();
+            dbg!(&s);
+
+            let n2_rt: ere::CipherText<'_, 8, 256> = serde_json::from_str(&s).unwrap();
+
+            assert_eq!(n1, n2_rt);
         }
 
         #[test]

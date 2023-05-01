@@ -31,6 +31,7 @@ jobs:
           RUSTFLAGS: -D warnings
         run: |
           cargo test
+          cargo test --all-features
 
   qc:
     runs-on: ubuntu-latest
@@ -61,6 +62,7 @@ jobs:
       - name: Consult Clippy
         run: |
           cargo clippy -- -D warnings
+          cargo clippy --all-features -- -D warnings
 
   bench:
     runs-on: ubuntu-latest
