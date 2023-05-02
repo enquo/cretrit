@@ -1,6 +1,7 @@
 //! An encrypted, comparable data type.
 
 use std::convert::AsMut;
+use std::marker::PhantomData;
 
 use crate::bitlist::{ReadableBitList, WritableBitList};
 use crate::cipher::Cipher;
@@ -78,9 +79,8 @@ where
 }
 
 /// A generic large-domain left ciphertext for the Lewi-Wu comparison-revealing encryption scheme.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct LeftCipherText<
-    'a,
     S: CipherSuite<W, M>,
     CMP: Comparator<M>,
     const N: usize,
@@ -91,25 +91,31 @@ pub(crate) struct LeftCipherText<
     f: [<<S as CipherSuite<W, M>>::PRF as PseudoRandomFunction>::BlockType; N],
     /// The p(x) for each block in the large-domain left ciphertext
     px: [u16; N],
-    /// The cipher being used to construct this left ciphertext, or None if this ciphertext came
-    /// from deserialisation (in which case it can't be modified, only compared)
-    cipher: Option<&'a Cipher<S, CMP, N, W, M>>,
+
+    /// Compiler pacification
+    _mark: PhantomData<CMP>,
 }
 
-impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16, const M: u8>
-    LeftCipherText<'a, S, CMP, N, W, M>
+impl<S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16, const M: u8>
+    LeftCipherText<S, CMP, N, W, M>
 {
     /// Create a new, blank left ciphertext, ready for writing a value into
-    pub(crate) fn new(cipher: &'a Cipher<S, CMP, N, W, M>) -> Self {
+    pub(crate) fn new() -> Self {
         LeftCipherText {
             f: [Default::default(); N],
             px: [0; N],
-            cipher: Some(cipher),
+
+            _mark: PhantomData,
         }
     }
 
     /// Encrypt the block value into the `n`th block of the left ciphertext
-    pub(crate) fn set_block(&mut self, n: usize, value: u16) -> Result<(), Error> {
+    pub(crate) fn set_block(
+        &mut self,
+        cipher: &Cipher<S, CMP, N, W, M>,
+        n: usize,
+        value: u16,
+    ) -> Result<(), Error> {
         if n >= N {
             return Err(Error::RangeError(format!(
                 "attempted to write to the {n}th block of {N} in left ciphertext"
@@ -118,12 +124,6 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
         if value >= W {
             return Err(Error::RangeError(format!("attempted to write a value {value} greater than the left ciphertext block width {W}")));
         }
-
-        let cipher = self.cipher.ok_or_else(|| {
-            Error::InternalError(
-                "attempted to set_block on a read-only left ciphertext".to_string(),
-            )
-        })?;
 
         let permuted_value = cipher.permuted_value(value)?;
 
@@ -170,7 +170,7 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
 }
 
 impl<S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16, const M: u8>
-    Serializable<N, W, M> for LeftCipherText<'_, S, CMP, N, W, M>
+    Serializable<N, W, M> for LeftCipherText<S, CMP, N, W, M>
 {
     fn from_slice(bytes: &[u8]) -> Result<Self, Error> {
         let mut f: [<<S as CipherSuite<W, M>>::PRF as PseudoRandomFunction>::BlockType; N] =
@@ -234,7 +234,8 @@ impl<S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16, con
         Ok(Self {
             f,
             px,
-            cipher: None,
+
+            _mark: PhantomData,
         })
     }
 
@@ -269,9 +270,8 @@ impl<S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16, con
 }
 
 /// A generic large-domain right ciphertext for the Lewi-Wu comparison-revealing encryption scheme.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct RightCipherText<
-    'a,
     S: CipherSuite<W, M>,
     CMP: Comparator<M>,
     const N: usize,
@@ -284,22 +284,22 @@ pub(crate) struct RightCipherText<
     nonce_cache: [[u8; 16]; N],
     /// The v_i sequences for each block
     values: Vec<Vec<u8>>,
-    /// The cipher instance with which to encrypt the blocks if we're writing, or None if this
-    /// ciphertext came from deserialisation (in which case it cannot be written, only compared)
-    cipher: Option<&'a Cipher<S, CMP, N, W, M>>,
+
+    /// Compiler pacification
+    _mark: (PhantomData<S>, PhantomData<CMP>),
 }
 
-impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16, const M: u8>
-    RightCipherText<'a, S, CMP, N, W, M>
+impl<S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16, const M: u8>
+    RightCipherText<S, CMP, N, W, M>
 {
     /// Spawn a new right ciphertext, ready to have its blocks written
-    pub(crate) fn new(cipher: &'a Cipher<S, CMP, N, W, M>) -> Result<Self, Error> {
+    pub(crate) fn new(cipher: &Cipher<S, CMP, N, W, M>) -> Result<Self, Error> {
         let values: Vec<Vec<u8>> = (0..N).map(|_| vec![0u8; W as usize]).collect();
         let mut rct = RightCipherText {
             nonce_base: Default::default(),
             nonce_cache: [Default::default(); N],
             values,
-            cipher: Some(cipher),
+            _mark: (PhantomData, PhantomData),
         };
 
         cipher.fill_nonce(&mut rct.nonce_base)?;
@@ -311,7 +311,7 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
 
     /// Generate the per-block nonces and cache them so we don't have to generate them every time
     /// we want to read them
-    fn cache_nonces(rct: &mut RightCipherText<'a, S, CMP, N, W, M>) -> Result<(), Error> {
+    fn cache_nonces(rct: &mut RightCipherText<S, CMP, N, W, M>) -> Result<(), Error> {
         let ndf = S::KBKDF::new(&rct.nonce_base)?;
 
         for i in 0..N {
@@ -336,7 +336,12 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
     }
 
     /// Encrypt the value provided into the `n`th block of the right ciphertext
-    pub(crate) fn set_block(&mut self, n: usize, value: u16) -> Result<(), Error> {
+    pub(crate) fn set_block(
+        &mut self,
+        cipher: &Cipher<S, CMP, N, W, M>,
+        n: usize,
+        value: u16,
+    ) -> Result<(), Error> {
         if n >= N {
             return Err(Error::RangeError(format!(
                 "attempted to write to the {n}th block of {N} in right ciphertext"
@@ -345,11 +350,6 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
         if value >= W {
             return Err(Error::RangeError(format!("attempted to write a value {value} greater than the right ciphertext block width {W}")));
         }
-        let cipher = self.cipher.ok_or_else(|| {
-            Error::InternalError(
-                "attempted to set_block on a read-only right ciphertext".to_string(),
-            )
-        })?;
 
         for i in 0..W {
             let mut b: <<S as CipherSuite<W, M>>::PRF as PseudoRandomFunction>::BlockType =
@@ -536,8 +536,8 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
     }
 }
 
-impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16, const M: u8>
-    Serializable<N, W, M> for RightCipherText<'a, S, CMP, N, W, M>
+impl<S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16, const M: u8>
+    Serializable<N, W, M> for RightCipherText<S, CMP, N, W, M>
 {
     fn from_slice(bytes: &[u8]) -> Result<Self, Error> {
         let nonce_base: [u8; 16] = clone_into_array(bytes.get(0..16).ok_or_else(|| {
@@ -557,11 +557,12 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
             )))
         }?;
 
-        let mut rct = RightCipherText::<'a, S, CMP, N, W, M> {
+        let mut rct = RightCipherText::<S, CMP, N, W, M> {
             nonce_base,
             values,
             nonce_cache: [Default::default(); N],
-            cipher: None,
+
+            _mark: (PhantomData, PhantomData),
         };
         Self::cache_nonces(&mut rct)?;
 
@@ -594,9 +595,8 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
 /// A Comparison-Revealing Encrypted value.
 ///
 #[doc = include_str!("../doc/ciphertexts.md")]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CipherText<
-    'a,
     S: CipherSuite<W, M>,
     CMP: Comparator<M>,
     const N: usize,
@@ -604,13 +604,13 @@ pub struct CipherText<
     const M: u8,
 > {
     /// The left part of the ciphertext, or None if this is a IND-CPA secure ciphertext
-    pub(crate) left: Option<LeftCipherText<'a, S, CMP, N, W, M>>,
+    pub(crate) left: Option<LeftCipherText<S, CMP, N, W, M>>,
     /// The right side of the ciphertext
-    pub(crate) right: RightCipherText<'a, S, CMP, N, W, M>,
+    pub(crate) right: RightCipherText<S, CMP, N, W, M>,
 }
 
-impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16, const M: u8>
-    CipherText<'a, S, CMP, N, W, M>
+impl<S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16, const M: u8>
+    CipherText<S, CMP, N, W, M>
 {
     /// Encrypt the plaintext to produce a new comparable ciphertext.
     ///
@@ -622,15 +622,15 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
     /// ciphertexts can perform correlation attacks to try and figure out what values are.
     ///
     pub(crate) fn new(
-        cipher: &'a Cipher<S, CMP, N, W, M>,
+        cipher: &Cipher<S, CMP, N, W, M>,
         plaintext: &PlainText<N, W>,
     ) -> Result<Self, Error> {
-        let mut left = LeftCipherText::new(cipher);
+        let mut left = LeftCipherText::new();
         let mut right = RightCipherText::new(cipher)?;
 
         for n in 0..N {
-            left.set_block(n, plaintext.block(n)?)?;
-            right.set_block(n, plaintext.block(n)?)?;
+            left.set_block(cipher, n, plaintext.block(n)?)?;
+            right.set_block(cipher, n, plaintext.block(n)?)?;
         }
 
         Ok(CipherText {
@@ -648,13 +648,13 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
     /// secure](https://en.wikipedia.org/wiki/Ciphertext_indistinguishability).
     ///
     pub(crate) fn new_right(
-        cipher: &'a Cipher<S, CMP, N, W, M>,
+        cipher: &Cipher<S, CMP, N, W, M>,
         plaintext: &PlainText<N, W>,
     ) -> Result<Self, Error> {
         let mut right = RightCipherText::new(cipher)?;
 
         for n in 0..N {
-            right.set_block(n, plaintext.block(n)?)?;
+            right.set_block(cipher, n, plaintext.block(n)?)?;
         }
 
         Ok(CipherText { left: None, right })
@@ -686,8 +686,8 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
     /// function in order to convert that into a "proper" logical comparison value.
     ///
     fn compare_parts(
-        left: &LeftCipherText<'a, S, CMP, N, W, M>,
-        right: &RightCipherText<'a, S, CMP, N, W, M>,
+        left: &LeftCipherText<S, CMP, N, W, M>,
+        right: &RightCipherText<S, CMP, N, W, M>,
     ) -> Result<u8, Error> {
         let mut result: Option<u8> = None;
 
@@ -712,8 +712,8 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
     }
 }
 
-impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16, const M: u8>
-    Serializable<N, W, M> for CipherText<'a, S, CMP, N, W, M>
+impl<S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16, const M: u8>
+    Serializable<N, W, M> for CipherText<S, CMP, N, W, M>
 {
     fn from_slice(bytes: &[u8]) -> Result<Self, Error> {
         let mut v = bytes;
@@ -728,7 +728,7 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
             )
         })?;
 
-        let left: Option<LeftCipherText<'a, S, CMP, N, W, M>> = if *t == 0 {
+        let left: Option<LeftCipherText<S, CMP, N, W, M>> = if *t == 0 {
             None
         } else if *t == 1 {
             let len_bytes = v.get(..2).ok_or_else(|| {
@@ -753,9 +753,7 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
             v = v.get(len..).ok_or_else(|| {
                 Error::ParseError("end-of-data while looking for rest of ciphertext".to_string())
             })?;
-            Some(LeftCipherText::<'a, S, CMP, N, W, M>::from_slice(
-                left_bytes,
-            )?)
+            Some(LeftCipherText::<S, CMP, N, W, M>::from_slice(left_bytes)?)
         } else {
             return Err(Error::ParseError(format!("unrecognised type byte {t}")));
         };
@@ -776,9 +774,9 @@ impl<'a, S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16,
             let right_bytes = v.get(..len).ok_or_else(|| {
                 Error::ParseError("end-of-data while looking for right ciphertext".to_string())
             })?;
-            let right = RightCipherText::<'a, S, CMP, N, W, M>::from_slice(right_bytes)?;
+            let right = RightCipherText::<S, CMP, N, W, M>::from_slice(right_bytes)?;
 
-            Ok(CipherText::<'a, S, CMP, N, W, M> { left, right })
+            Ok(CipherText::<S, CMP, N, W, M> { left, right })
         } else {
             Err(Error::ParseError(format!(
                 "length does not match size in right ciphertext (expected={len}, actual={})",
@@ -925,7 +923,7 @@ mod tests {
 
             let s = serde_json::to_string(&n).unwrap();
 
-            let n_rt: ere::CipherText<'_, 8, 256> = serde_json::from_str(&s).unwrap();
+            let n_rt: ere::CipherText<8, 256> = serde_json::from_str(&s).unwrap();
 
             assert_eq!(n, n_rt);
             assert_eq!(n_rt, n);
@@ -944,7 +942,7 @@ mod tests {
             let s = serde_json::to_string(&n2).unwrap();
             dbg!(&s);
 
-            let n2_rt: ere::CipherText<'_, 8, 256> = serde_json::from_str(&s).unwrap();
+            let n2_rt: ere::CipherText<8, 256> = serde_json::from_str(&s).unwrap();
 
             assert_eq!(n1, n2_rt);
         }

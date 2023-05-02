@@ -98,25 +98,23 @@ pub type Cipher<const N: usize, const W: u16> = C<CipherSuite<W, 2>, EqualityCMP
 ///
 /// See the documentation for [`CipherText`](crate::CipherText) for usage information.
 ///
-pub type CipherText<'a, const N: usize, const W: u16> =
-    CT<'a, CipherSuite<W, 2>, EqualityCMP, N, W, 2>;
+pub type CipherText<const N: usize, const W: u16> = CT<CipherSuite<W, 2>, EqualityCMP, N, W, 2>;
 
-impl<const N: usize, const W: u16> PartialEq for CipherText<'_, N, W> {
-    fn eq(&self, other: &CipherText<'_, N, W>) -> bool {
+impl<const N: usize, const W: u16> PartialEq for CipherText<N, W> {
+    #[allow(clippy::panic, clippy::expect_used)] // No way to return error in impl Ord
+    fn eq(&self, other: &CipherText<N, W>) -> bool {
         match self.left {
             None => match other.left {
-                #[allow(clippy::panic)] // No way to return error when implementing Ord
                 None => panic!("Neither ciphertext in comparison has a left component"),
-                Some(_) => !other.eq(self),
+                Some(_) => other.eq(self),
             },
-            #[allow(clippy::expect_used)] // No way to return error when implementing Ord
             Some(_) => EqualityCMP::invert(self.compare(other).expect("comparison failed"))
                 .expect("could not invert comparison value"),
         }
     }
 }
 
-impl<const N: usize, const W: u16> Eq for CipherText<'_, N, W> {}
+impl<const N: usize, const W: u16> Eq for CipherText<N, W> {}
 
 #[cfg(test)]
 mod tests {

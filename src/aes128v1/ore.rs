@@ -97,11 +97,10 @@ pub type Cipher<const N: usize, const W: u16> = C<CipherSuite<W, 3>, OrderingCMP
 ///
 /// See the documentation for [`CipherText`](crate::CipherText) for usage information.
 ///
-pub type CipherText<'a, const N: usize, const W: u16> =
-    CT<'a, CipherSuite<W, 3>, OrderingCMP, N, W, 3>;
+pub type CipherText<const N: usize, const W: u16> = CT<CipherSuite<W, 3>, OrderingCMP, N, W, 3>;
 
-impl<const N: usize, const W: u16> Ord for CipherText<'_, N, W> {
-    fn cmp(&self, other: &CipherText<'_, N, W>) -> Ordering {
+impl<const N: usize, const W: u16> Ord for CipherText<N, W> {
+    fn cmp(&self, other: &CipherText<N, W>) -> Ordering {
         match self.left {
             None => match other.left {
                 #[allow(clippy::panic)] // No way to return an error when implementing Ord
@@ -119,19 +118,19 @@ impl<const N: usize, const W: u16> Ord for CipherText<'_, N, W> {
     }
 }
 
-impl<const N: usize, const W: u16> PartialOrd for CipherText<'_, N, W> {
-    fn partial_cmp(&self, other: &CipherText<'_, N, W>) -> Option<Ordering> {
+impl<const N: usize, const W: u16> PartialOrd for CipherText<N, W> {
+    fn partial_cmp(&self, other: &CipherText<N, W>) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<const N: usize, const W: u16> PartialEq for CipherText<'_, N, W> {
-    fn eq(&self, other: &CipherText<'_, N, W>) -> bool {
+impl<const N: usize, const W: u16> PartialEq for CipherText<N, W> {
+    fn eq(&self, other: &CipherText<N, W>) -> bool {
         self.cmp(other) == Ordering::Equal
     }
 }
 
-impl<const N: usize, const W: u16> Eq for CipherText<'_, N, W> {}
+impl<const N: usize, const W: u16> Eq for CipherText<N, W> {}
 
 #[cfg(test)]
 mod tests {

@@ -116,7 +116,7 @@ impl<S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16, con
     pub fn full_encrypt(
         &self,
         value: &PlainText<N, W>,
-    ) -> Result<CipherText<'_, S, CMP, N, W, M>, Error> {
+    ) -> Result<CipherText<S, CMP, N, W, M>, Error> {
         CipherText::<S, CMP, N, W, M>::new(self, value)
     }
 
@@ -133,7 +133,7 @@ impl<S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16, con
     pub fn right_encrypt(
         &self,
         value: &PlainText<N, W>,
-    ) -> Result<CipherText<'_, S, CMP, N, W, M>, Error> {
+    ) -> Result<CipherText<S, CMP, N, W, M>, Error> {
         CipherText::<S, CMP, N, W, M>::new_right(self, value)
     }
 
