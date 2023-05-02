@@ -23,7 +23,7 @@ use crate::{hash, kbkdf, prf, prp};
 /// if anything needs to change, for any reason, a new ciphersuite is defined with the different
 /// parameters.
 ///
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct CipherSuite<const W: u16, const M: u8> {}
 

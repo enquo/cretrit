@@ -50,7 +50,7 @@ pub trait KBKDF {
 /// AES-128 is typically hardware accelerated, giving a performance boost over a construction using
 /// HMAC SHA-256, for example.
 ///
-#[derive(ZeroizeOnDrop)]
+#[derive(ZeroizeOnDrop, Clone)]
 #[allow(clippy::upper_case_acronyms)]
 pub struct CMACAES128 {
     /// The key from which all our new keys are derived

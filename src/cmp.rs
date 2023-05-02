@@ -20,7 +20,7 @@ pub trait Comparator<const M: u8> {
 }
 
 /// A comparator implementation that can do <, =, >
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct OrderingCMP {}
 
 impl OrderingCMP {
@@ -48,7 +48,7 @@ impl Comparator<3> for OrderingCMP {
 }
 
 /// A comparator implementation for strict equality
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EqualityCMP {}
 
 impl EqualityCMP {

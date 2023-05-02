@@ -15,7 +15,7 @@ use crate::prp::PseudoRandomPermutation;
 /// able to refer to the collection of primitives as a cohesive unit, so as to fully define an
 /// implementation in terms of its primitives.
 ///
-pub trait CipherSuite<const W: u16, const M: u8> {
+pub trait CipherSuite<const W: u16, const M: u8>: Clone {
     /// The random-number generator
     ///
     /// A quality RNG is required both for generating random values (like nonces), but also as a

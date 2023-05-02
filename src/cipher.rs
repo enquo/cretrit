@@ -39,6 +39,7 @@ use crate::Error;
 /// These more-contrained Cipher types only require you to specify the block count and width (`N`
 /// and `W`) and the key to use for encryption, which is far more tractable.
 ///
+#[derive(Clone)]
 pub struct Cipher<
     S: CipherSuite<W, M>,
     CMP: Comparator<M>,
