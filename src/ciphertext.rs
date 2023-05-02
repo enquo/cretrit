@@ -1,5 +1,6 @@
 //! An encrypted, comparable data type.
 
+use rand::{RngCore, SeedableRng};
 use std::convert::AsMut;
 use std::marker::PhantomData;
 
@@ -9,7 +10,6 @@ use crate::ciphersuite::CipherSuite;
 use crate::cmp::Comparator;
 use crate::error::Error;
 use crate::hash::HashFunction;
-use crate::kbkdf::{KBKDFInit, KBKDF};
 use crate::plaintext::PlainText;
 use crate::prf::PseudoRandomFunction;
 use crate::util::check_overflow;
@@ -37,8 +37,8 @@ pub trait Serializable<const N: usize, const W: u16, const M: u8> {
     /// use cretrit::SerializableCipherText;
     ///
     /// # fn main() -> Result<(), cretrit::Error> {
-    /// # let key = [0u8; 16];
-    /// # let cipher = ore::Cipher::<4, 256>::new(key)?;
+    /// # let key = [0u8; 32];
+    /// # let cipher = ore::Cipher::<4, 256>::new(&key)?;
     /// # let forty_two = cipher.full_encrypt(&42u32.try_into()?)?;
     /// # let serialised_ciphertext = forty_two.to_vec()?;
     /// // Assuming serialised_ciphertext is a Vec<u8> or similar...
@@ -304,32 +304,33 @@ impl<S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16, con
 
         cipher.fill_nonce(&mut rct.nonce_base)?;
 
-        Self::cache_nonces(&mut rct)?;
+        rct.cache_nonces()?;
 
         Ok(rct)
     }
 
     /// Generate the per-block nonces and cache them so we don't have to generate them every time
     /// we want to read them
-    fn cache_nonces(rct: &mut RightCipherText<S, CMP, N, W, M>) -> Result<(), Error> {
-        let ndf = S::KBKDF::new(&rct.nonce_base)?;
+    fn cache_nonces(&mut self) -> Result<(), Error> {
+        let mut seed: <<S as CipherSuite<W, M>>::RNG as SeedableRng>::Seed = Default::default();
+        let seed_len = std::cmp::min(seed.as_mut().len(), self.nonce_base.len());
+
+        seed.as_mut()
+            .get_mut(0..seed_len)
+            .ok_or_else(|| {
+                Error::InternalError(format!("could not get seed slice, seed_len={seed_len}"))
+            })?
+            .copy_from_slice(self.nonce_base.get(0..seed_len).ok_or_else(|| {
+                Error::InternalError(format!(
+                    "could not get nonce base slice, seed_len={seed_len}"
+                ))
+            })?);
+        let mut ndf: <S as CipherSuite<W, M>>::RNG = SeedableRng::from_seed(seed);
 
         for i in 0..N {
-            let mut k = Vec::<u8>::with_capacity(11);
-            k.extend_from_slice(b"RCTnonce.");
-            k.extend_from_slice(
-                &(u16::try_from(i).map_err(|e| {
-                    Error::RangeError(format!("failed to convert {i} to u16 ({e})"))
-                })?)
-                .to_be_bytes(),
-            );
-
-            ndf.derive_key(
-                rct.nonce_cache.get_mut(i).ok_or_else(|| {
-                    Error::RangeError(format!("failed to get {i}th nonce from cache"))
-                })?,
-                &k,
-            )?;
+            ndf.fill_bytes(self.nonce_cache.get_mut(i).ok_or_else(|| {
+                Error::RangeError(format!("failed to get {i}th nonce from cache"))
+            })?);
         }
 
         Ok(())
@@ -564,7 +565,7 @@ impl<S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16, con
 
             _mark: (PhantomData, PhantomData),
         };
-        Self::cache_nonces(&mut rct)?;
+        rct.cache_nonces()?;
 
         Ok(rct)
     }
@@ -845,8 +846,8 @@ mod tests {
     use super::*;
     use rand::Rng;
 
-    fn key() -> [u8; 16] {
-        let mut k: [u8; 16] = Default::default();
+    fn key() -> [u8; 32] {
+        let mut k: [u8; 32] = Default::default();
 
         // Yes, using a potentially-weak RNG would normally be terribad, but
         // for testing purposes, it's not going to break anything
@@ -866,7 +867,7 @@ mod tests {
 
         #[test]
         fn full_ciphertext_has_left() {
-            let cipher = ere::Cipher::<8, 256>::new(key()).unwrap();
+            let cipher = ere::Cipher::<8, 256>::new(&key()).unwrap();
 
             let n = cipher.full_encrypt(&31_337u64.try_into().unwrap()).unwrap();
 
@@ -875,7 +876,7 @@ mod tests {
 
         #[test]
         fn right_ciphertext_does_not_have_left() {
-            let cipher = ere::Cipher::<8, 256>::new(key()).unwrap();
+            let cipher = ere::Cipher::<8, 256>::new(&key()).unwrap();
 
             let n = cipher
                 .right_encrypt(&31_337u64.try_into().unwrap())
@@ -886,7 +887,7 @@ mod tests {
 
         #[test]
         fn binary_full_ciphertext_roundtrips_correctly() {
-            let cipher = ere::Cipher::<8, 256>::new(key()).unwrap();
+            let cipher = ere::Cipher::<8, 256>::new(&key()).unwrap();
 
             let n = cipher.full_encrypt(&31_337u64.try_into().unwrap()).unwrap();
 
@@ -900,7 +901,7 @@ mod tests {
 
         #[test]
         fn binary_right_ciphertext_roundtrips_correctly() {
-            let cipher = ere::Cipher::<8, 256>::new(key()).unwrap();
+            let cipher = ere::Cipher::<8, 256>::new(&key()).unwrap();
 
             let n1 = cipher.full_encrypt(&31_337u64.try_into().unwrap()).unwrap();
             let n2 = cipher
@@ -917,7 +918,7 @@ mod tests {
         #[test]
         #[cfg(feature = "serde")]
         fn serde_full_ciphertext_roundtrips_correctly() {
-            let cipher = ere::Cipher::<8, 256>::new(key()).unwrap();
+            let cipher = ere::Cipher::<8, 256>::new(&key()).unwrap();
 
             let n = cipher.full_encrypt(&31_337u64.try_into().unwrap()).unwrap();
 
@@ -932,7 +933,7 @@ mod tests {
         #[test]
         #[cfg(feature = "serde")]
         fn serde_right_ciphertext_roundtrips_correctly() {
-            let cipher = ere::Cipher::<8, 256>::new(key()).unwrap();
+            let cipher = ere::Cipher::<8, 256>::new(&key()).unwrap();
 
             let n1 = cipher.full_encrypt(&31_337u64.try_into().unwrap()).unwrap();
             let n2 = cipher
@@ -949,7 +950,7 @@ mod tests {
 
         #[test]
         fn cannot_deserialise_full_ciphertext_with_smaller_chunk_count() {
-            let cipher = ere::Cipher::<4, 256>::new(key()).unwrap();
+            let cipher = ere::Cipher::<4, 256>::new(&key()).unwrap();
 
             let n = cipher.full_encrypt(&31_337u32.try_into().unwrap()).unwrap();
             let v = n.to_vec().unwrap();
@@ -959,7 +960,7 @@ mod tests {
 
         #[test]
         fn cannot_deserialise_full_ciphertext_with_larger_chunk_count() {
-            let cipher = ere::Cipher::<8, 256>::new(key()).unwrap();
+            let cipher = ere::Cipher::<8, 256>::new(&key()).unwrap();
 
             let n = cipher.full_encrypt(&31_337u32.try_into().unwrap()).unwrap();
             let v = n.to_vec().unwrap();
@@ -969,7 +970,7 @@ mod tests {
 
         #[test]
         fn cannot_deserialise_full_ciphertext_with_smaller_chunk_width() {
-            let cipher = ere::Cipher::<4, 16>::new(key()).unwrap();
+            let cipher = ere::Cipher::<4, 16>::new(&key()).unwrap();
 
             let n = cipher.full_encrypt(&42u16.try_into().unwrap()).unwrap();
             let v = n.to_vec().unwrap();
@@ -979,7 +980,7 @@ mod tests {
 
         #[test]
         fn cannot_deserialise_full_ciphertext_with_larger_chunk_width() {
-            let cipher = ere::Cipher::<4, 256>::new(key()).unwrap();
+            let cipher = ere::Cipher::<4, 256>::new(&key()).unwrap();
 
             let n = cipher.full_encrypt(&42u16.try_into().unwrap()).unwrap();
             let v = n.to_vec().unwrap();
@@ -989,7 +990,7 @@ mod tests {
 
         #[test]
         fn cannot_deserialise_right_ciphertext_with_smaller_chunk_count() {
-            let cipher = ere::Cipher::<4, 256>::new(key()).unwrap();
+            let cipher = ere::Cipher::<4, 256>::new(&key()).unwrap();
 
             let n = cipher
                 .right_encrypt(&31_337u32.try_into().unwrap())
@@ -1001,7 +1002,7 @@ mod tests {
 
         #[test]
         fn cannot_deserialise_right_ciphertext_with_larger_chunk_count() {
-            let cipher = ere::Cipher::<8, 256>::new(key()).unwrap();
+            let cipher = ere::Cipher::<8, 256>::new(&key()).unwrap();
 
             let n = cipher
                 .right_encrypt(&31_337u32.try_into().unwrap())
@@ -1013,7 +1014,7 @@ mod tests {
 
         #[test]
         fn cannot_deserialise_right_ciphertext_with_smaller_chunk_width() {
-            let cipher = ere::Cipher::<4, 16>::new(key()).unwrap();
+            let cipher = ere::Cipher::<4, 16>::new(&key()).unwrap();
 
             let n = cipher.right_encrypt(&42u16.try_into().unwrap()).unwrap();
             let v = n.to_vec().unwrap();
@@ -1023,7 +1024,7 @@ mod tests {
 
         #[test]
         fn cannot_deserialise_right_ciphertext_with_larger_chunk_width() {
-            let cipher = ere::Cipher::<4, 256>::new(key()).unwrap();
+            let cipher = ere::Cipher::<4, 256>::new(&key()).unwrap();
 
             let n = cipher.right_encrypt(&42u16.try_into().unwrap()).unwrap();
             let v = n.to_vec().unwrap();
@@ -1038,7 +1039,7 @@ mod tests {
 
         #[test]
         fn trinary_full_ciphertext_roundtrips_correctly() {
-            let cipher = ore::Cipher::<8, 256>::new(key()).unwrap();
+            let cipher = ore::Cipher::<8, 256>::new(&key()).unwrap();
 
             let n1 = cipher.full_encrypt(&42u64.try_into().unwrap()).unwrap();
             let n2 = cipher.full_encrypt(&31_337u64.try_into().unwrap()).unwrap();
@@ -1062,7 +1063,7 @@ mod tests {
 
         #[test]
         fn trinary_right_ciphertext_roundtrips_correctly() {
-            let cipher = ore::Cipher::<8, 256>::new(key()).unwrap();
+            let cipher = ore::Cipher::<8, 256>::new(&key()).unwrap();
 
             let n1f = cipher.full_encrypt(&42u64.try_into().unwrap()).unwrap();
             let mut n1r = cipher.full_encrypt(&42u64.try_into().unwrap()).unwrap();
@@ -1088,7 +1089,7 @@ mod tests {
 
         #[test]
         fn cannot_deserialise_full_ciphertext_with_smaller_chunk_count() {
-            let cipher = ore::Cipher::<4, 256>::new(key()).unwrap();
+            let cipher = ore::Cipher::<4, 256>::new(&key()).unwrap();
 
             let n = cipher.full_encrypt(&31_337u32.try_into().unwrap()).unwrap();
             let v = n.to_vec().unwrap();
@@ -1098,7 +1099,7 @@ mod tests {
 
         #[test]
         fn cannot_deserialise_full_ciphertext_with_larger_chunk_count() {
-            let cipher = ore::Cipher::<8, 256>::new(key()).unwrap();
+            let cipher = ore::Cipher::<8, 256>::new(&key()).unwrap();
 
             let n = cipher.full_encrypt(&31_337u32.try_into().unwrap()).unwrap();
             let v = n.to_vec().unwrap();
@@ -1108,7 +1109,7 @@ mod tests {
 
         #[test]
         fn cannot_deserialise_full_ciphertext_with_smaller_chunk_width() {
-            let cipher = ore::Cipher::<4, 16>::new(key()).unwrap();
+            let cipher = ore::Cipher::<4, 16>::new(&key()).unwrap();
 
             let n = cipher.full_encrypt(&42u16.try_into().unwrap()).unwrap();
             let v = n.to_vec().unwrap();
@@ -1118,7 +1119,7 @@ mod tests {
 
         #[test]
         fn cannot_deserialise_full_ciphertext_with_larger_chunk_width() {
-            let cipher = ore::Cipher::<4, 256>::new(key()).unwrap();
+            let cipher = ore::Cipher::<4, 256>::new(&key()).unwrap();
 
             let n = cipher.full_encrypt(&42u16.try_into().unwrap()).unwrap();
             let v = n.to_vec().unwrap();
@@ -1128,7 +1129,7 @@ mod tests {
 
         #[test]
         fn cannot_deserialise_right_ciphertext_with_smaller_chunk_count() {
-            let cipher = ore::Cipher::<4, 256>::new(key()).unwrap();
+            let cipher = ore::Cipher::<4, 256>::new(&key()).unwrap();
 
             let n = cipher
                 .right_encrypt(&31_337u32.try_into().unwrap())
@@ -1140,7 +1141,7 @@ mod tests {
 
         #[test]
         fn cannot_deserialise_right_ciphertext_with_larger_chunk_count() {
-            let cipher = ore::Cipher::<8, 256>::new(key()).unwrap();
+            let cipher = ore::Cipher::<8, 256>::new(&key()).unwrap();
 
             let n = cipher
                 .right_encrypt(&31_337u32.try_into().unwrap())
@@ -1152,7 +1153,7 @@ mod tests {
 
         #[test]
         fn cannot_deserialise_right_ciphertext_with_smaller_chunk_width() {
-            let cipher = ore::Cipher::<4, 16>::new(key()).unwrap();
+            let cipher = ore::Cipher::<4, 16>::new(&key()).unwrap();
 
             let n = cipher.right_encrypt(&42u16.try_into().unwrap()).unwrap();
             let v = n.to_vec().unwrap();
@@ -1162,7 +1163,7 @@ mod tests {
 
         #[test]
         fn cannot_deserialise_right_ciphertext_with_larger_chunk_width() {
-            let cipher = ore::Cipher::<4, 256>::new(key()).unwrap();
+            let cipher = ore::Cipher::<4, 256>::new(&key()).unwrap();
 
             let n = cipher.right_encrypt(&42u16.try_into().unwrap()).unwrap();
             let v = n.to_vec().unwrap();

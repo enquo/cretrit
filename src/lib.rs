@@ -26,9 +26,11 @@ pub mod aes128v1;
 mod bitlist;
 mod cmp;
 mod hash;
-mod kbkdf;
 mod prf;
 mod prp;
+
+#[doc(hidden)]
+pub mod kbkdf;
 
 #[cfg(feature = "serde")]
 mod serde;

@@ -16,11 +16,11 @@
 //! # fn main() -> Result<(), cretrit::Error> {
 //! // All ciphertexts encrypted with the same block size/width and key can be compared
 //! // ALWAYS USE A CRYPTOGRAPHICALLY SECURE KEY!
-//! let mut key: [u8; 16] = Default::default();
+//! let mut key: [u8; 32] = Default::default();
 //! let mut rng = ChaCha20Rng::from_entropy();
 //! rng.fill_bytes(&mut key);
 //!
-//! let cipher = ere::Cipher::<4, 256>::new(key)?;
+//! let cipher = ere::Cipher::<4, 256>::new(&key)?;
 //! let forty_two = cipher.full_encrypt(&42u32.try_into()?)?;
 //! # Ok(())
 //! # }
@@ -33,9 +33,9 @@
 //! # use cretrit::aes128v1::ere;
 //!
 //! # fn main() -> Result<(), cretrit::Error> {
-//! # let key = [0u8; 16];
+//! # let key = [0u8; 32];
 //!
-//! # let cipher = ere::Cipher::<4, 256>::new(key)?;
+//! # let cipher = ere::Cipher::<4, 256>::new(&key)?;
 //! let forty_two = cipher.full_encrypt(&42u32.try_into()?)?;
 //! let over_nine_thousand = cipher.full_encrypt(&9001u32.try_into()?)?;
 //!
@@ -54,10 +54,8 @@
 //! use cretrit::SerializableCipherText;
 //!
 //! # fn main() -> Result<(), cretrit::Error> {
-//!
-//! # let key = [0u8; 16];
-//!
-//! # let cipher = ere::Cipher::<4, 256>::new(key)?;
+//! # let key = [0u8; 32];
+//! # let cipher = ere::Cipher::<4, 256>::new(&key)?;
 //! let forty_two = cipher.full_encrypt(&42u32.try_into()?)?;
 //! let serialized = forty_two.to_vec()?;
 //! # Ok(())
@@ -72,10 +70,8 @@
 //! use cretrit::SerializableCipherText;
 //!
 //! # fn main() -> Result<(), cretrit::Error> {
-//!
-//! # let key = [0u8; 16];
-//!
-//! # let cipher = ere::Cipher::<4, 256>::new(key)?;
+//! # let key = [0u8; 32];
+//! # let cipher = ere::Cipher::<4, 256>::new(&key)?;
 //! # let forty_two = cipher.full_encrypt(&42u32.try_into()?)?;
 //! # let serialized = forty_two.to_vec()?;
 //! let deserialized = ere::CipherText::<4, 256>::from_slice(&serialized)?;
@@ -122,8 +118,8 @@ mod tests {
     use crate::PlainText;
     use rand::Rng;
 
-    fn key() -> [u8; 16] {
-        let mut k: [u8; 16] = Default::default();
+    fn key() -> [u8; 32] {
+        let mut k: [u8; 32] = Default::default();
 
         // Yes, using a potentially-weak RNG would normally be terribad, but
         // for testing purposes, it's not going to break anything
@@ -136,7 +132,7 @@ mod tests {
 
     #[test]
     fn tiny_self_equality() {
-        let cipher = Cipher::<1, 4>::new(key()).unwrap();
+        let cipher = Cipher::<1, 4>::new(&key()).unwrap();
 
         let n = cipher
             .full_encrypt(&PlainText::<1, 4>::new([2u16]))
@@ -147,7 +143,7 @@ mod tests {
 
     #[test]
     fn tiny_equality() {
-        let cipher = Cipher::<1, 4>::new(key()).unwrap();
+        let cipher = Cipher::<1, 4>::new(&key()).unwrap();
 
         let n2_1 = cipher
             .full_encrypt(&PlainText::<1, 4>::new([2u16]))
@@ -162,7 +158,7 @@ mod tests {
 
     #[test]
     fn tiny_inequality() {
-        let cipher = Cipher::<1, 4>::new(key()).unwrap();
+        let cipher = Cipher::<1, 4>::new(&key()).unwrap();
 
         let n1 = cipher
             .full_encrypt(&PlainText::<1, 4>::new([1u16]))
@@ -177,7 +173,7 @@ mod tests {
 
     #[test]
     fn smol_self_equality() {
-        let cipher = Cipher::<2, 16>::new(key()).unwrap();
+        let cipher = Cipher::<2, 16>::new(&key()).unwrap();
 
         let n12 = cipher
             .full_encrypt(&PlainText::<2, 16>::new([0u16, 12]))
@@ -188,7 +184,7 @@ mod tests {
 
     #[test]
     fn smol_equality() {
-        let cipher = Cipher::<2, 16>::new(key()).unwrap();
+        let cipher = Cipher::<2, 16>::new(&key()).unwrap();
 
         let n12_1 = cipher
             .full_encrypt(&PlainText::<2, 16>::new([0u16, 12]))
@@ -203,7 +199,7 @@ mod tests {
 
     #[test]
     fn smol_inequality() {
-        let cipher = Cipher::<2, 16>::new(key()).unwrap();
+        let cipher = Cipher::<2, 16>::new(&key()).unwrap();
 
         let n1 = cipher
             .full_encrypt(&PlainText::<2, 16>::new([0u16, 1]))
@@ -218,7 +214,7 @@ mod tests {
 
     #[test]
     fn big_diff_energy() {
-        let cipher = Cipher::<8, 256>::new(key()).unwrap();
+        let cipher = Cipher::<8, 256>::new(&key()).unwrap();
 
         let n1 = cipher.full_encrypt(&1u64.try_into().unwrap()).unwrap();
         let n2 = cipher
@@ -231,7 +227,7 @@ mod tests {
 
     quickcheck! {
         fn u64_compare(a: u64, b: u64) -> bool {
-            let cipher = Cipher::<8, 256>::new(key()).unwrap();
+            let cipher = Cipher::<8, 256>::new(&key()).unwrap();
 
             let ca = cipher.full_encrypt(&a.try_into().unwrap()).unwrap();
             let cb = cipher.full_encrypt(&b.try_into().unwrap()).unwrap();
@@ -244,7 +240,7 @@ mod tests {
         }
 
         fn u32_compare(a: u32, b: u32) -> bool {
-            let cipher = Cipher::<4, 256>::new(key()).unwrap();
+            let cipher = Cipher::<4, 256>::new(&key()).unwrap();
 
             let ca = cipher.full_encrypt(&a.try_into().unwrap()).unwrap();
             let cb = cipher.full_encrypt(&b.try_into().unwrap()).unwrap();
@@ -257,7 +253,7 @@ mod tests {
         }
 
         fn u64_eq(a: u64, b: u64) -> bool {
-            let cipher = Cipher::<8, 256>::new(key()).unwrap();
+            let cipher = Cipher::<8, 256>::new(&key()).unwrap();
 
             let ca = cipher.full_encrypt(&a.try_into().unwrap()).unwrap();
             let cb = cipher.full_encrypt(&b.try_into().unwrap()).unwrap();
@@ -270,7 +266,7 @@ mod tests {
         }
 
         fn u32_eq(a: u32, b: u32) -> bool {
-            let cipher = Cipher::<4, 256>::new(key()).unwrap();
+            let cipher = Cipher::<4, 256>::new(&key()).unwrap();
 
             let ca = cipher.full_encrypt(&a.try_into().unwrap()).unwrap();
             let cb = cipher.full_encrypt(&b.try_into().unwrap()).unwrap();

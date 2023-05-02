@@ -32,5 +32,5 @@ impl<const W: u16, const M: u8> SuperSweet<W, M> for CipherSuite<W, M> {
     type PRF = prf::AES128PRF;
     type HF = hash::CMACAES128HF<M>;
     type PRP = prp::RandShufflePRP<W>;
-    type KBKDF = kbkdf::CMACAES128;
+    type KBKDF = kbkdf::CMACAES256;
 }

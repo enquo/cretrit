@@ -22,9 +22,9 @@ use crate::Error;
 /// ```rust
 /// use cretrit::aes128v1::ore;
 /// # fn main() -> Result<(), cretrit::Error> {
-/// # let key = [0u8; 16];
+/// # let key = [0u8; 32];
 ///
-/// let cipher = ore::Cipher::<4, 256>::new(key)?;
+/// let cipher = ore::Cipher::<4, 256>::new(&key)?;
 /// let encrypted_value = cipher.full_encrypt(&42u32.try_into()?)?;
 /// # Ok(())
 /// # }

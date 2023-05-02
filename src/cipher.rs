@@ -82,14 +82,14 @@ impl<S: CipherSuite<W, M>, CMP: Comparator<M>, const N: usize, const W: u16, con
     /// Can return an error if any of the underlying cryptographic operations can't complete, or if
     /// there's a bug somewhere.
     ///
-    pub fn new(key: [u8; 16]) -> Result<Self, Error>
+    pub fn new(key: &[u8; 32]) -> Result<Self, Error>
     where
         <S as CipherSuite<W, M>>::PRF: PseudoRandomFunctionInit,
         <S as CipherSuite<W, M>>::PRP: PseudoRandomPermutationInit<W>,
         <S as CipherSuite<W, M>>::KBKDF: 'static,
     {
         #![allow(clippy::similar_names)] // I think we can keep things clear in here, prf/prp is totes different
-        let kbkdf: Box<dyn KBKDF> = S::KBKDF::new(&key)
+        let kbkdf: Box<dyn KBKDF> = S::KBKDF::new(key)
             .map_err(|e| Error::KeyError(format!("failed to create KBKDF instance: {e}")))?;
 
         let prf: S::PRF = PseudoRandomFunctionInit::new(&*kbkdf)?;

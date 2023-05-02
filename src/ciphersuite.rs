@@ -1,7 +1,7 @@
 //! The home of the `CipherSuite` trait.
 //!
 
-use rand::{CryptoRng, Rng, SeedableRng};
+use rand::{CryptoRng, RngCore, SeedableRng};
 
 use crate::hash::HashFunction;
 use crate::kbkdf::{KBKDFInit, KBKDF};
@@ -21,7 +21,7 @@ pub trait CipherSuite<const W: u16, const M: u8>: Clone {
     /// A quality RNG is required both for generating random values (like nonces), but also as a
     /// source of *deterministic* randomness, by being seeded by a key of some kind.
     ///
-    type RNG: Rng + SeedableRng + CryptoRng;
+    type RNG: RngCore + SeedableRng + CryptoRng;
 
     /// The pseudo-random function
     ///

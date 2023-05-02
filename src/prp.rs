@@ -103,10 +103,10 @@ impl<const W: u16> PseudoRandomPermutation<W> for RandShufflePRP<W> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::kbkdf::{KBKDFInit, CMACAES128};
+    use crate::kbkdf::{KBKDFInit, CMACAES256};
 
     fn kdf() -> Box<dyn KBKDF> {
-        CMACAES128::new(&[0u8; 16]).unwrap()
+        CMACAES256::new(&[0u8; 32]).unwrap()
     }
 
     #[test]

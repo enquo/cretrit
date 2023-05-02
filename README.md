@@ -38,8 +38,8 @@ use cretrit::aes128v1::ore;
 // 0-255.  Hence, this cipher can represent the ordering of values
 // between 0 and 256^4-1 (aka 2**32-1), which corresponds to a 32-bit
 // unsigned integer.
-// The `[0; u16]` is the key; for real-world usage, use a cryptographically-secure key, please!
-let cipher = ore::Cipher::<4, 256>::new([0u8; 16])?;
+// The `[0u8; 32]` is the key; for real-world usage, use a cryptographically-secure key, please!
+let cipher = ore::Cipher::<4, 256>::new(&[0u8; 32])?;
 # Ok(())
 # }
 ```
@@ -51,7 +51,7 @@ For encrypting unsigned integers, there are implementations of the `TryFrom` tra
 ```rust
 # use cretrit::aes128v1::ore;
 # fn main() -> Result<(), cretrit::Error> {
-# let cipher = ore::Cipher::<4, 256>::new([0u8; 16])?;
+# let cipher = ore::Cipher::<4, 256>::new(&[0u8; 32])?;
 let forty_two: u32 = 42;
 let ore_forty_two = cipher.full_encrypt(&forty_two.try_into()?)?;
 let over_nine_thousand: u32 = 9001;
@@ -68,7 +68,7 @@ Thus, you can just compare the outputs of the `encrypt` function like they were 
 ```rust
 # use cretrit::aes128v1::ore;
 # fn main() -> Result<(), cretrit::Error> {
-# let cipher = ore::Cipher::<4, 256>::new([0u8; 16])?;
+# let cipher = ore::Cipher::<4, 256>::new(&[0u8; 32])?;
 # let ore_forty_two = cipher.full_encrypt(&42u32.try_into()?)?;
 # let ore_over_nine_thousand = cipher.full_encrypt(&9001u32.try_into()?)?;
 assert!(ore_forty_two != ore_over_nine_thousand);
@@ -86,7 +86,7 @@ use cretrit::SerializableCipherText;
 
 # use cretrit::aes128v1::ore;
 # fn main() -> Result<(), cretrit::Error> {
-# let cipher = ore::Cipher::<4, 256>::new([0u8; 16])?;
+# let cipher = ore::Cipher::<4, 256>::new(&[0u8; 32])?;
 # let ore_forty_two = cipher.full_encrypt(&42u32.try_into()?)?;
 # let ore_over_nine_thousand = cipher.full_encrypt(&9001u32.try_into()?)?;
 let v = ore_forty_two.to_vec()?;
