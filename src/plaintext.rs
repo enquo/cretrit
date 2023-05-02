@@ -51,13 +51,13 @@ impl<const N: usize, const W: u16> PlainText<N, W> {
     }
 }
 
-/// Generate an implementation of [`TryFrom`] for an integer type
+/// Generate an implementation of [`TryFrom`] for an unsigned integer type
 macro_rules! from_uint_to_plaintext {
     ($ty:ident) => {
         impl<const N: usize, const W: u16> TryFrom<$ty> for PlainText<N, W> {
             type Error = Error;
 
-            fn try_from(value: $ty) -> Result<PlainText<N, W>, Self::Error>  {
+            fn try_from(value: $ty) -> Result<Self, Self::Error>  {
                 let mut u: u128 = value.try_into().map_err(|e| Self::Error::RangeError(format!("Couldn't represent value {value} as u128 ({e})")))?;
                 let mut p = [0u16; N];
                 let width: u128 = W.try_into().map_err(|e| Self::Error::InternalError(format!("Couldn't represent W {W} as u128 ({e})")))?;
