@@ -32,14 +32,18 @@ For example:
 ```rust
 // Let's do some order-revealing encryption!
 use cretrit::aes128v1::ore;
+# use rand::{Rng, SeedableRng};
+# use rand_chacha::ChaCha20Rng;
 
 # fn main() -> Result<(), cretrit::Error> {
+// Always use cryptographically-secure random keys!
+let key = ChaCha20Rng::from_entropy().gen::<[u8; 32]>();
+
 // This cipher has four blocks, the value of each is in the range
 // 0-255.  Hence, this cipher can represent the ordering of values
 // between 0 and 256^4-1 (aka 2**32-1), which corresponds to a 32-bit
 // unsigned integer.
-// The `[0u8; 32]` is the key; for real-world usage, use a cryptographically-secure key, please!
-let cipher = ore::Cipher::<4, 256>::new(&[0u8; 32])?;
+let cipher = ore::Cipher::<4, 256>::new(&key)?;
 # Ok(())
 # }
 ```
