@@ -9,27 +9,27 @@ use cretrit::SerializableCipherText;
 
 #[inline]
 fn create_ore_cipher() -> ore::Cipher<8, 256> {
-    let k = hex!["adfd30251dfc5f6cfe240febf43970dd"];
+    let k = hex!["adfd30251dfc5f6cfe240febf43970dd b1c8053580207d781d6d762d19177b01"];
 
-    ore::Cipher::<8, 256>::new(black_box(k)).unwrap()
+    ore::Cipher::<8, 256>::new(black_box(&k)).unwrap()
 }
 
 #[inline]
-fn encrypt_u64<'a>(c: &'a ore::Cipher<8, 256>, u: u64) -> ore::CipherText<'a, 8, 256> {
+fn encrypt_u64(c: &ore::Cipher<8, 256>, u: u64) -> ore::CipherText<8, 256> {
     c.full_encrypt(&u.try_into().unwrap()).unwrap()
 }
 
-fn serialise_ciphertext(ct: &ore::CipherText<'_, 8, 256>) -> Vec<u8> {
+fn serialise_ciphertext(ct: &ore::CipherText<8, 256>) -> Vec<u8> {
     ct.to_vec().unwrap()
 }
 
-fn deserialise_ciphertext(v: &[u8]) -> ore::CipherText<'_, 8, 256> {
+fn deserialise_ciphertext(v: &[u8]) -> ore::CipherText<8, 256> {
     ore::CipherText::<8, 256>::from_slice(v).unwrap()
 }
 
 fn compare_ciphertexts(
-    a: &ore::CipherText<'_, 8, 256>,
-    b: &ore::CipherText<'_, 8, 256>,
+    a: &ore::CipherText<8, 256>,
+    b: &ore::CipherText<8, 256>,
 ) -> std::cmp::Ordering {
     a.cmp(b)
 }
