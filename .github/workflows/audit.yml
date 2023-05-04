@@ -5,6 +5,33 @@ on:
 
 jobs:
   security:
+    name: Verify that all our deps are secure
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v1
+
+      - name: Install rust
+        id: rust-install
+        uses: dtolney/rust-toolchain@stable
+
+      - name: Cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo
+            target/
+          key: ${{ runner.os }}-${{ steps.rust-install.outputs.cachekey }}-cargo
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
+      - name: Audit
+        run: |
+          cargo audit -D warnings
+
+  nightly_compat:
+    name: See if future Rust versions will break anything
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -12,27 +39,23 @@ jobs:
         with:
           submodules: true
 
-      - name: Audit
-        uses: actions-rs/audit-check@v1
+      - name: Install rust
+        id: rust-install
+        uses: dtolney/rust-toolchain@nightly
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-  clippy_nightly:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v1
-        with:
-          submodules: true
-
-      - name: Audit
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: nightly
           components: clippy
-          override: true
+
+      # Normally this would be where we use actions/cache, but since nightly
+      # is likely to change on every run, it doesn't seem worth it
+
+      - name: Test
+        env:
+          RUSTFLAGS: -D warnings
+        run: |
+          cargo +${{steps.rust-install.outputs.name}} test
+          cargo +${{steps.rust-install.outputs.name}} test --all-features
 
       - name: Clippy
-        uses: actions-rs/clippy-check@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cargo +${{steps.rust-install.outputs.name}} clippy -- -D warnings
+          cargo +${{steps.rust-install.outputs.name}} clippy --all-features -- -D warnings
