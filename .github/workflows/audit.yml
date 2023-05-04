@@ -2,6 +2,9 @@ name: Periodic audits
 on:
   schedule:
     - cron: "0 0 * * *"
+  push:
+    paths:
+      - .github/workflows/audit.yml
 
 jobs:
   security:
