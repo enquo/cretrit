@@ -10,12 +10,19 @@ jobs:
     runs-on: ubuntu-latest
     name: "Test"
 
+    strategy:
+      matrix:
+        rust-toolchain: ['stable', 'nightly']
+      fail-fast: false
+
     steps:
       - uses: actions/checkout@v3
 
       - name: Install rust
         id: rust-install
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust-toolchain }}
 
       - uses: actions/cache@v3
         with:
@@ -28,20 +35,26 @@ jobs:
         env:
           RUSTFLAGS: -D warnings
         run: |
-          cargo test
-          cargo test --all-features
+          cargo +${{steps.rust-install.outputs.name}} test
+          cargo +${{steps.rust-install.outputs.name}} test --all-features
 
   qc:
     runs-on: ubuntu-latest
     name: "Quality Control"
+
+    strategy:
+      matrix:
+        rust-toolchain: ['stable', 'nightly']
+      fail-fast: false
 
     steps:
       - uses: actions/checkout@v3
 
       - name: Install rust
         id: rust-install
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ matrix.rust-toolchain }}
           components: rustfmt, clippy
 
       - uses: actions/cache@v3
@@ -53,12 +66,12 @@ jobs:
 
       - name: Check formatting
         run: |
-          cargo fmt --check
+          cargo +${{steps.rust-install.outputs.name}} fmt --check
 
       - name: Consult Clippy
         run: |
-          cargo clippy -- -D warnings
-          cargo clippy --all-features -- -D warnings
+          cargo +${{steps.rust-install.outputs.name}} clippy -- -D warnings
+          cargo +${{steps.rust-install.outputs.name}} clippy --all-features -- -D warnings
 
   bench:
     runs-on: ubuntu-latest
