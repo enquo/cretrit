@@ -31,7 +31,8 @@ jobs:
 
       - name: Audit
         run: |
-          cargo audit -D warnings
+          cargo audit -D warnings \
+          --ignore RUSTSEC-2021-0145  # Transitive through criterion; awaiting new release with https://github.com/bheisler/criterion.rs/pull/628
 
   nightly_compat:
     name: See if future Rust versions will break anything
