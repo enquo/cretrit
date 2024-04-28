@@ -282,7 +282,7 @@ pub(crate) struct RightCipherText<
     nonce_base: [u8; 16],
     /// Cached copies of the per-block nonces
     nonce_cache: [[u8; 16]; N],
-    /// The v_i sequences for each block
+    /// The `v_i` sequences for each block
     values: Vec<Vec<u8>>,
 
     /// Compiler pacification
