@@ -29,12 +29,12 @@ pub trait PseudoRandomFunctionInit: Sized + PseudoRandomFunction {
 
 /// Operation of a PRF
 pub trait PseudoRandomFunction: Sized {
-    /// The exact type of the block of data that will be returned by randomise()
+    /// The exact type of the block of data that will be returned by `randomise()`
     ///
     /// In practice this will always be a u8 array of some size
     type BlockType: Default + Copy + Fill + core::fmt::Debug + Into<Vec<u8>> + AsMut<[u8]>;
 
-    /// The number of elements in the block returned from randomise()
+    /// The number of elements in the block returned from `randomise()`
     ///
     /// Unsurprisingly, this must match the number of elements in `BlockType`
     const BLOCK_SIZE: usize;

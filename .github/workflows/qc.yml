@@ -73,6 +73,10 @@ jobs:
           cargo +${{steps.rust-install.outputs.name}} clippy -- -D warnings
           cargo +${{steps.rust-install.outputs.name}} clippy --all-features -- -D warnings
 
+      - name: Check docs
+        run: |
+          cargo +${{steps.rust-install.outputs.name}} rustdoc -- -D warnings
+
   bench:
     runs-on: ubuntu-latest
     name: "Benchmarks"
